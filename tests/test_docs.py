@@ -6,10 +6,10 @@ def test_api_docs_swagger_ui_loads(client):
     assert response.status_code == 200
 
 
+
 def test_api_schema_loads(client):
     url = reverse('schema')
     response = client.get(url)
     assert response.status_code == 200
 
-
-
+    
