@@ -17,6 +17,7 @@ class CustomUserManager(UserManager):
         extra_fields.setdefault('role', Role.ADMIN)
 
         return self._create_user(username, email, password, **extra_fields)
+        
 
 class User(AbstractUser):
     """
