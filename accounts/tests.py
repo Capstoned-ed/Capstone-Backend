@@ -42,4 +42,3 @@ def test_force_password_change_flag():
         force_password_change=True
     )
     assert user.force_password_change is True
-

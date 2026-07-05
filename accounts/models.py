@@ -15,9 +15,8 @@ class CustomUserManager(UserManager):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('role', Role.ADMIN)
-        
+
         return self._create_user(username, email, password, **extra_fields)
-        
 
 class User(AbstractUser):
     """
@@ -34,7 +33,10 @@ class User(AbstractUser):
     )
     force_password_change = models.BooleanField(
         default=False,
-        help_text=_('Designates whether the user must change their password upon next login.'),
+        help_text=_(
+            'Designates whether the user must change their password '
+            'upon next login.'
+        ),
     )
 
     def __str__(self):
