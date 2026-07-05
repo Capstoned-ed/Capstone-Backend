@@ -1,6 +1,7 @@
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+
 
 class Role(models.TextChoices):
     STUDENT = 'student', _('Student')
@@ -8,11 +9,23 @@ class Role(models.TextChoices):
     REGISTRAR = 'registrar', _('Registrar')
     ADMIN = 'admin', _('Admin')
 
+
+class CustomUserManager(UserManager):
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('role', Role.ADMIN)
+        
+        return self._create_user(username, email, password, **extra_fields)
+        
+
 class User(AbstractUser):
     """
     Custom User model following the institution-managed account pattern.
     Public registration is disabled. Users are provisioned by Admins.
     """
+    objects = CustomUserManager()
+
     role = models.CharField(
         max_length=20,
         choices=Role.choices,

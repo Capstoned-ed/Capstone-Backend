@@ -27,8 +27,6 @@ def test_create_admin_user():
         email='admin@test.com',
         password='testpassword123'
     )
-    admin_user.role = Role.ADMIN
-    admin_user.save()
     assert admin_user.is_superuser is True
     assert admin_user.is_staff is True
     assert admin_user.role == Role.ADMIN
