@@ -2,7 +2,9 @@ import pytest
 from django.contrib.auth import get_user_model
 from accounts.models import Role
 
+
 User = get_user_model()
+
 
 @pytest.mark.django_db
 def test_create_user_with_role():
@@ -17,6 +19,7 @@ def test_create_user_with_role():
     assert user.force_password_change is False
     assert str(user) == 'student1 (Student)'
 
+
 @pytest.mark.django_db
 def test_create_admin_user():
     admin_user = User.objects.create_superuser(
@@ -30,6 +33,7 @@ def test_create_admin_user():
     assert admin_user.is_staff is True
     assert admin_user.role == Role.ADMIN
 
+
 @pytest.mark.django_db
 def test_force_password_change_flag():
     user = User.objects.create_user(
@@ -40,3 +44,4 @@ def test_force_password_change_flag():
         force_password_change=True
     )
     assert user.force_password_change is True
+
