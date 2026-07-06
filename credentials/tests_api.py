@@ -120,7 +120,6 @@ class RequirementDocumentAPITests(APITestCase):
     @classmethod
     def setUpClass(cls):
         import tempfile
-        import shutil
         super().setUpClass()
         cls.temp_media_dir = tempfile.mkdtemp()
         from credentials.storage import private_storage
@@ -134,6 +133,7 @@ class RequirementDocumentAPITests(APITestCase):
         private_storage.location = cls.original_private_location
         shutil.rmtree(cls.temp_media_dir, ignore_errors=True)
         super().tearDownClass()
+
     def setUp(self):
         self.student1 = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
@@ -274,7 +274,6 @@ class RequirementDocumentAPITests(APITestCase):
         self.assertEqual(dl_res3.status_code, status.HTTP_200_OK)
 
     def test_storage_path_verification(self):
-        from django.conf import settings
         import os
         self.client.force_authenticate(user=self.student1)
         file_content = b"%PDF-1.4\n%content"
