@@ -1,13 +1,14 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from .models import CredentialType
+from .models import CredentialType, CredentialRequest
 from .serializers import (
     CredentialTypeSerializer,
-    CredentialTypeCreateUpdateSerializer
+    CredentialTypeCreateUpdateSerializer,
+    CredentialRequestSerializer
 )
-from .permissions import IsAdminOrRegistrarOrReadOnly
-from .services import CredentialTypeService
+from .permissions import IsAdminOrRegistrarOrReadOnly, CredentialRequestPermission
+from .services import CredentialTypeService, CredentialRequestService
 from accounts.models import Role
 
 
@@ -72,3 +73,46 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
             credential_type=instance
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CredentialRequestViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing credential requests.
+    """
+    serializer_class = CredentialRequestSerializer
+    permission_classes = [CredentialRequestPermission]
+
+    def get_queryset(self):
+        qs = CredentialRequest.objects.select_related(
+            'user', 'credential_type'
+        ).order_by('-created_at')
+        user = self.request.user
+
+        if user.is_authenticated and user.role == Role.STUDENT:
+            return qs.filter(user=user)
+
+        return qs
+
+    @extend_schema(responses={201: CredentialRequestSerializer})
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        credential_request = CredentialRequestService.create_request(
+            actor=request.user,
+            validated_data=serializer.validated_data
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            CredentialRequestSerializer(credential_request).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    def update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
