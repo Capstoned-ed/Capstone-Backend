@@ -40,7 +40,7 @@ class CredentialTypeTests(APITestCase):
     def test_inactive_credential_visibility(self):
         # Create an inactive credential type
         CredentialType.objects.create(
-            code='INAC', name='Inactive Cert', price=Decimal('10.00'), 
+            code='INAC', name='Inactive Cert', price=Decimal('10.00'),
             processing_days=1, is_active=False
         )
 

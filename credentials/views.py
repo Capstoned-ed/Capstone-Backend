@@ -26,10 +26,10 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        
+
         if user.is_authenticated and user.role not in [Role.ADMIN, Role.REGISTRAR]:
             return qs.filter(is_active=True)
-            
+
         return qs
 
     @extend_schema(responses={201: CredentialTypeSerializer})
