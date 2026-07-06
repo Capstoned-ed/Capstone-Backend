@@ -1,6 +1,6 @@
 from django.db import transaction
 from audit.services import AuditService
-from .models import CredentialType
+from .models import CredentialType, CredentialRequest
 
 
 class CredentialTypeService:
@@ -79,3 +79,26 @@ class CredentialTypeService:
             new_state={'is_active': False}
         )
         return credential_type
+
+
+class CredentialRequestService:
+    @staticmethod
+    @transaction.atomic
+    def create_request(actor, validated_data):
+        validated_data['user'] = actor
+        credential_request = CredentialRequest.objects.create(**validated_data)
+
+        AuditService.log_action(
+            actor=actor,
+            action='REQUEST_CREATED',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state=None,
+            new_state={
+                'tracking_number': credential_request.tracking_number,
+                'status': credential_request.status,
+                'credential_type': credential_request.credential_type.code,
+                'remarks': credential_request.remarks
+            }
+        )
+        return credential_request
