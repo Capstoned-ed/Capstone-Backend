@@ -1,4 +1,7 @@
+import uuid
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
 
 
 class CredentialType(models.Model):
@@ -36,3 +39,66 @@ class CredentialType(models.Model):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+
+class RequestStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    REQUIREMENTS_VERIFICATION = 'REQUIREMENTS_VERIFICATION', 'Requirements Verification'
+    REQUIREMENTS_REJECTED = 'REQUIREMENTS_REJECTED', 'Requirements Rejected'
+    PAYMENT_PENDING = 'PAYMENT_PENDING', 'Payment Pending'
+    PAYMENT_VERIFIED = 'PAYMENT_VERIFIED', 'Payment Verified'
+    PROCESSING = 'PROCESSING', 'Processing'
+    READY_FOR_RELEASE = 'READY_FOR_RELEASE', 'Ready for Release'
+    RELEASED = 'RELEASED', 'Released'
+    REJECTED = 'REJECTED', 'Rejected'
+    CANCELLED = 'CANCELLED', 'Cancelled'
+
+
+class CredentialRequest(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='credential_requests'
+    )
+    credential_type = models.ForeignKey(
+        CredentialType,
+        on_delete=models.PROTECT,
+        related_name='requests'
+    )
+    status = models.CharField(
+        max_length=50,
+        choices=RequestStatus.choices,
+        default=RequestStatus.PENDING
+    )
+    tracking_number = models.CharField(max_length=20, unique=True, editable=False)
+    remarks = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['user']),
+            models.Index(fields=['tracking_number']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.tracking_number:
+            year = timezone.now().year
+            last_request = CredentialRequest.objects.filter(
+                tracking_number__startswith=f'REQ-{year}-'
+            ).order_by('-tracking_number').first()
+
+            if last_request:
+                last_sequence = int(last_request.tracking_number.split('-')[-1])
+                new_sequence = last_sequence + 1
+            else:
+                new_sequence = 1
+
+            self.tracking_number = f'REQ-{year}-{new_sequence:06d}'
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.tracking_number} - {self.status}"
