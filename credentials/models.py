@@ -3,6 +3,7 @@ from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 from .validators import validate_file_size, validate_file_extension, validate_mime_type
+from .storage import private_storage
 
 
 class CredentialType(models.Model):
@@ -126,6 +127,7 @@ class RequirementDocument(models.Model):
     )
     file = models.FileField(
         upload_to=document_upload_path,
+        storage=private_storage,
         validators=[validate_file_size, validate_file_extension, validate_mime_type]
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)

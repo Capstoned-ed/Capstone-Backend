@@ -117,6 +117,23 @@ class CredentialRequestAPITests(APITestCase):
 
 
 class RequirementDocumentAPITests(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        import shutil
+        super().setUpClass()
+        cls.temp_media_dir = tempfile.mkdtemp()
+        from credentials.storage import private_storage
+        cls.original_private_location = private_storage.location
+        private_storage.location = cls.temp_media_dir
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        from credentials.storage import private_storage
+        private_storage.location = cls.original_private_location
+        shutil.rmtree(cls.temp_media_dir, ignore_errors=True)
+        super().tearDownClass()
     def setUp(self):
         self.student1 = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
@@ -143,7 +160,7 @@ class RequirementDocumentAPITests(APITestCase):
 
     def test_student_can_upload_valid_document(self):
         self.client.force_authenticate(user=self.student1)
-        file_content = b"fake pdf content"
+        file_content = b"%PDF-1.4\n%fake pdf content"
         file = SimpleUploadedFile(
             "test.pdf", file_content, content_type="application/pdf"
         )
@@ -165,7 +182,7 @@ class RequirementDocumentAPITests(APITestCase):
     def test_student_cannot_upload_to_others_request(self):
         self.client.force_authenticate(user=self.student1)
         file = SimpleUploadedFile(
-            "test.pdf", b"content", content_type="application/pdf"
+            "test.pdf", b"%PDF-1.4\n%fake", content_type="application/pdf"
         )
 
         data = {
@@ -180,7 +197,7 @@ class RequirementDocumentAPITests(APITestCase):
     def test_forbidden_file_extension(self):
         self.client.force_authenticate(user=self.student1)
         file = SimpleUploadedFile(
-            "test.exe", b"content", content_type="application/pdf"
+            "test.exe", b"%PDF-1.4\n%fake", content_type="application/pdf"
         )
 
         data = {
@@ -194,8 +211,9 @@ class RequirementDocumentAPITests(APITestCase):
 
     def test_forbidden_mime_type(self):
         self.client.force_authenticate(user=self.student1)
+        # Fake an executable inside a PDF extension
         file = SimpleUploadedFile(
-            "test.pdf", b"content", content_type="application/x-msdownload"
+            "test.pdf", b"MZ\x90\x00\x03\x00", content_type="application/pdf"
         )
 
         data = {
@@ -211,7 +229,9 @@ class RequirementDocumentAPITests(APITestCase):
         self.client.force_authenticate(user=self.student1)
         # 6MB file
         file = SimpleUploadedFile(
-            "test.pdf", b"x" * (6 * 1024 * 1024), content_type="application/pdf"
+            "test.pdf",
+            b"%PDF-1.4\n" + b"x" * (6 * 1024 * 1024),
+            content_type="application/pdf"
         )
 
         data = {
@@ -226,8 +246,9 @@ class RequirementDocumentAPITests(APITestCase):
     def test_protected_download(self):
         # Upload a document first
         self.client.force_authenticate(user=self.student1)
+        file_content = b"%PDF-1.4\n%content"
         file = SimpleUploadedFile(
-            "test.pdf", b"content", content_type="application/pdf"
+            "test.pdf", file_content, content_type="application/pdf"
         )
         data = {'request': self.req1.id, 'document_type': 'ID', 'file': file}
         res = self.client.post(self.url_list, data, format='multipart')
@@ -240,7 +261,7 @@ class RequirementDocumentAPITests(APITestCase):
         # Student1 can download
         dl_res = self.client.get(download_url)
         self.assertEqual(dl_res.status_code, status.HTTP_200_OK)
-        self.assertEqual(b"".join(dl_res.streaming_content), b"content")
+        self.assertEqual(b"".join(dl_res.streaming_content), file_content)
 
         # Student2 cannot download (due to queryset/object permissions)
         self.client.force_authenticate(user=self.student2)
@@ -251,3 +272,24 @@ class RequirementDocumentAPITests(APITestCase):
         self.client.force_authenticate(user=self.admin)
         dl_res3 = self.client.get(download_url)
         self.assertEqual(dl_res3.status_code, status.HTTP_200_OK)
+
+    def test_storage_path_verification(self):
+        from django.conf import settings
+        import os
+        self.client.force_authenticate(user=self.student1)
+        file_content = b"%PDF-1.4\n%content"
+        file = SimpleUploadedFile(
+            "test.pdf", file_content, content_type="application/pdf"
+        )
+        data = {'request': self.req1.id, 'document_type': 'ID', 'file': file}
+        res = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        doc_id = res.data['id']
+        from .models import RequirementDocument
+        from credentials.storage import private_storage
+        doc = RequirementDocument.objects.get(id=doc_id)
+
+        # Verify it uses the private storage
+        self.assertTrue(doc.file.path.startswith(str(private_storage.location)))
+        self.assertTrue(os.path.exists(doc.file.path))

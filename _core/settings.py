@@ -135,6 +135,9 @@ STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Private Media files
+PRIVATE_ROOT = BASE_DIR / 'private_media'
+
 # Django REST Framework Settings
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',

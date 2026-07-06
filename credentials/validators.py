@@ -1,5 +1,5 @@
 import os
-import mimetypes
+import filetype
 from django.core.exceptions import ValidationError
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
@@ -21,9 +21,12 @@ def validate_file_extension(file):
 
 
 def validate_mime_type(file):
-    content_type = getattr(file, 'content_type', None)
-    if not content_type:
-        content_type, _ = mimetypes.guess_type(file.name)
+    # Read the first 2048 bytes for magic byte inspection
+    file_chunk = file.read(2048)
+    file.seek(0)
+
+    kind = filetype.guess(file_chunk)
+    content_type = kind.mime if kind else None
 
     if content_type not in ALLOWED_MIME_TYPES:
         allowed = ', '.join(ALLOWED_MIME_TYPES)
