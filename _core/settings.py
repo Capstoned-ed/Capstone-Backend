@@ -20,7 +20,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Initialize environ
 env = environ.Env(
-    #false dapat ni during prod
     DEBUG=(bool, False)
 )
 # Read .env file if it exists
