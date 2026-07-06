@@ -20,7 +20,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Initialize environ
 env = environ.Env(
-    DEBUG=(bool, True)
+    #false dapat ni during prod
+    DEBUG=(bool, False)
 )
 # Read .env file if it exists
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))

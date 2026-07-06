@@ -8,6 +8,7 @@ from .serializers import (
 )
 from .permissions import IsAdminOrRegistrarOrReadOnly
 from .services import CredentialTypeService
+from accounts.models import Role
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
@@ -21,6 +22,15 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update']:
             return CredentialTypeCreateUpdateSerializer
         return CredentialTypeSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        
+        if user.is_authenticated and user.role not in [Role.ADMIN, Role.REGISTRAR]:
+            return qs.filter(is_active=True)
+            
+        return qs
 
     @extend_schema(responses={201: CredentialTypeSerializer})
     def create(self, request, *args, **kwargs):

@@ -37,6 +37,24 @@ class CredentialTypeTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
+    def test_inactive_credential_visibility(self):
+        # Create an inactive credential type
+        CredentialType.objects.create(
+            code='INAC', name='Inactive Cert', price=Decimal('10.00'), 
+            processing_days=1, is_active=False
+        )
+
+        # Admin should see both active and inactive (2 total)
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(self.url_list)
+        self.assertEqual(len(response.data), 2)
+
+        # Student should only see active (1 total)
+        self.client.force_authenticate(user=self.student)
+        response = self.client.get(self.url_list)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['code'], 'TOR')
+
     def test_student_write_forbidden(self):
         self.client.force_authenticate(user=self.student)
         data = {
