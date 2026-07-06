@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CredentialType, CredentialRequest
+from .models import CredentialType, CredentialRequest, RequirementDocument
 
 
 class CredentialTypeSerializer(serializers.ModelSerializer):
@@ -46,5 +46,24 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         if not value.is_active:
             raise serializers.ValidationError(
                 "Cannot request an inactive credential type."
+            )
+        return value
+
+
+class RequirementDocumentSerializer(serializers.ModelSerializer):
+    """
+    Representation of a RequirementDocument.
+    """
+    class Meta:
+        model = RequirementDocument
+        fields = ['id', 'request', 'document_type', 'file', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+    def validate_request(self, value):
+        user = self.context['request'].user
+        from accounts.models import Role
+        if user.role == Role.STUDENT and value.user != user:
+            raise serializers.ValidationError(
+                "You can only upload documents to your own credential requests."
             )
         return value

@@ -2,6 +2,8 @@ import uuid
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
+from .validators import validate_file_size, validate_file_extension, validate_mime_type
+from .storage import private_storage
 
 
 class CredentialType(models.Model):
@@ -104,3 +106,31 @@ class CredentialRequest(models.Model):
 
     def __str__(self):
         return f"{self.tracking_number} - {self.status}"
+
+
+def document_upload_path(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    return f"requests/{instance.request.id}/{filename}"
+
+
+class RequirementDocument(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(
+        CredentialRequest,
+        on_delete=models.CASCADE,
+        related_name='documents'
+    )
+    document_type = models.CharField(
+        max_length=50,
+        help_text="Type of document (e.g., ID, CLEARANCE)."
+    )
+    file = models.FileField(
+        upload_to=document_upload_path,
+        storage=private_storage,
+        validators=[validate_file_size, validate_file_extension, validate_mime_type]
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.document_type} for {self.request.tracking_number}"
