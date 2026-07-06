@@ -41,3 +41,10 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at'
         ]
+
+    def validate_credential_type(self, value):
+        if not value.is_active:
+            raise serializers.ValidationError(
+                "Cannot request an inactive credential type."
+            )
+        return value

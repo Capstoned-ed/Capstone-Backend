@@ -89,3 +89,27 @@ class CredentialRequestAPITests(APITestCase):
             self.client.force_authenticate(user=user)
             response = self.client.post(self.url_list, data, format='json')
             self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_student_cannot_request_inactive_credential(self):
+        """Student receives 400 Bad Request if credential type is inactive."""
+        inactive_ctype = CredentialType.objects.create(
+            code='INAC', name='Inactive Cert', price=Decimal('10.00'),
+            processing_days=1, is_active=False
+        )
+        self.client.force_authenticate(user=self.student1)
+        data = {'credential_type': inactive_ctype.id}
+        response = self.client.post(self.url_list, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('credential_type', response.data)
+
+    def test_permission_class_blocks_non_safe_methods(self):
+        """
+        DELETE/PATCH should be blocked by permission class (403),
+        not just ViewSet (405).
+        """
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.delete(self.url_detail1)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.patch(self.url_detail1, {'remarks': 'test'})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

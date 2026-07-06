@@ -34,6 +34,9 @@ class CredentialRequestPermission(permissions.BasePermission):
         if request.method == 'POST':
             return request.user.role == Role.STUDENT
 
+        if request.method not in permissions.SAFE_METHODS:
+            return False
+
         return True
 
     def has_object_permission(self, request, view, obj):
