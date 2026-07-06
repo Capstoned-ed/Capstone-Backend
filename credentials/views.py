@@ -1,26 +1,14 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
-from .models import CredentialType, CredentialRequest, RequirementDocument
+from .models import CredentialType, CredentialRequest
 from .serializers import (
     CredentialTypeSerializer,
     CredentialTypeCreateUpdateSerializer,
-    CredentialRequestSerializer,
-    RequirementDocumentSerializer
+    CredentialRequestSerializer
 )
-from .permissions import (
-    IsAdminOrRegistrarOrReadOnly,
-    CredentialRequestPermission,
-    RequirementDocumentPermission
-)
-from .services import (
-    CredentialTypeService,
-    CredentialRequestService,
-    RequirementDocumentService
-)
+from .permissions import IsAdminOrRegistrarOrReadOnly, CredentialRequestPermission
+from .services import CredentialTypeService, CredentialRequestService
 from accounts.models import Role
 
 
@@ -118,60 +106,6 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             CredentialRequestSerializer(credential_request).data,
             status=status.HTTP_201_CREATED,
             headers=headers
-        )
-
-    def update(self, request, *args, **kwargs):
-        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-    def partial_update(self, request, *args, **kwargs):
-        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-    def destroy(self, request, *args, **kwargs):
-        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-class RequirementDocumentViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint for managing requirement documents.
-    """
-    serializer_class = RequirementDocumentSerializer
-    permission_classes = [RequirementDocumentPermission]
-    parser_classes = [MultiPartParser, FormParser]
-
-    def get_queryset(self):
-        qs = RequirementDocument.objects.select_related(
-            'request__user'
-        ).order_by('-uploaded_at')
-        user = self.request.user
-
-        if user.is_authenticated and user.role == Role.STUDENT:
-            return qs.filter(request__user=user)
-
-        return qs
-
-    @extend_schema(responses={201: RequirementDocumentSerializer})
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        document = RequirementDocumentService.upload_document(
-            actor=request.user,
-            validated_data=serializer.validated_data
-        )
-        headers = self.get_success_headers(serializer.data)
-        return Response(
-            RequirementDocumentSerializer(document).data,
-            status=status.HTTP_201_CREATED,
-            headers=headers
-        )
-
-    @action(detail=True, methods=['get'])
-    def download(self, request, pk=None):
-        document = self.get_object()
-        filename = document.file.name.split('/')[-1]
-        return FileResponse(
-            document.file.open('rb'),
-            as_attachment=True,
-            filename=filename
         )
 
     def update(self, request, *args, **kwargs):

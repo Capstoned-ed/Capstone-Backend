@@ -43,29 +43,3 @@ class CredentialRequestPermission(permissions.BasePermission):
         if request.user.role == Role.STUDENT:
             return obj.user == request.user
         return True
-
-
-class RequirementDocumentPermission(permissions.BasePermission):
-    """
-    Permissions for RequirementDocument:
-    - POST: Only Students can upload documents.
-    - SAFE_METHODS: All authenticated users can access
-      (filtered by queryset/object perms).
-    - Object level: Students can only access documents for their own requests.
-    """
-    def has_permission(self, request, view):
-        if not request.user.is_authenticated:
-            return False
-
-        if request.method == 'POST':
-            return request.user.role == Role.STUDENT
-
-        if request.method not in permissions.SAFE_METHODS:
-            return False
-
-        return True
-
-    def has_object_permission(self, request, view, obj):
-        if request.user.role == Role.STUDENT:
-            return obj.request.user == request.user
-        return True
