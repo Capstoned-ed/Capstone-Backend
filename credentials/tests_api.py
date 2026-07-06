@@ -6,6 +6,7 @@ from accounts.models import Role
 from .models import CredentialType, CredentialRequest
 from audit.models import AuditLog
 from decimal import Decimal
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 User = get_user_model()
 
@@ -113,3 +114,140 @@ class CredentialRequestAPITests(APITestCase):
 
         response = self.client.patch(self.url_detail1, {'remarks': 'test'})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class RequirementDocumentAPITests(APITestCase):
+    def setUp(self):
+        self.student1 = User.objects.create_user(
+            username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
+        )
+        self.student2 = User.objects.create_user(
+            username='stud2', email='s2@test.com', password='p', role=Role.STUDENT
+        )
+        self.admin = User.objects.create_user(
+            username='admin1', email='a@test.com', password='p', role=Role.ADMIN
+        )
+
+        self.ctype = CredentialType.objects.create(
+            code='TOR', name='Transcript', price=Decimal('150.00'), processing_days=5
+        )
+
+        self.req1 = CredentialRequest.objects.create(
+            user=self.student1, credential_type=self.ctype
+        )
+        self.req2 = CredentialRequest.objects.create(
+            user=self.student2, credential_type=self.ctype
+        )
+
+        self.url_list = reverse('requirementdocument-list')
+
+    def test_student_can_upload_valid_document(self):
+        self.client.force_authenticate(user=self.student1)
+        file_content = b"fake pdf content"
+        file = SimpleUploadedFile(
+            "test.pdf", file_content, content_type="application/pdf"
+        )
+
+        data = {
+            'request': self.req1.id,
+            'document_type': 'ID',
+            'file': file
+        }
+        response = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        # Verify Audit Log
+        log = AuditLog.objects.filter(action='DOCUMENT_UPLOADED').first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.actor, self.student1)
+        self.assertEqual(log.new_state['document_type'], 'ID')
+
+    def test_student_cannot_upload_to_others_request(self):
+        self.client.force_authenticate(user=self.student1)
+        file = SimpleUploadedFile(
+            "test.pdf", b"content", content_type="application/pdf"
+        )
+
+        data = {
+            'request': self.req2.id,  # student2's request
+            'document_type': 'ID',
+            'file': file
+        }
+        response = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('request', response.data)
+
+    def test_forbidden_file_extension(self):
+        self.client.force_authenticate(user=self.student1)
+        file = SimpleUploadedFile(
+            "test.exe", b"content", content_type="application/pdf"
+        )
+
+        data = {
+            'request': self.req1.id,
+            'document_type': 'ID',
+            'file': file
+        }
+        response = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('file', response.data)
+
+    def test_forbidden_mime_type(self):
+        self.client.force_authenticate(user=self.student1)
+        file = SimpleUploadedFile(
+            "test.pdf", b"content", content_type="application/x-msdownload"
+        )
+
+        data = {
+            'request': self.req1.id,
+            'document_type': 'ID',
+            'file': file
+        }
+        response = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('file', response.data)
+
+    def test_oversized_file(self):
+        self.client.force_authenticate(user=self.student1)
+        # 6MB file
+        file = SimpleUploadedFile(
+            "test.pdf", b"x" * (6 * 1024 * 1024), content_type="application/pdf"
+        )
+
+        data = {
+            'request': self.req1.id,
+            'document_type': 'ID',
+            'file': file
+        }
+        response = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('file', response.data)
+
+    def test_protected_download(self):
+        # Upload a document first
+        self.client.force_authenticate(user=self.student1)
+        file = SimpleUploadedFile(
+            "test.pdf", b"content", content_type="application/pdf"
+        )
+        data = {'request': self.req1.id, 'document_type': 'ID', 'file': file}
+        res = self.client.post(self.url_list, data, format='multipart')
+        doc_id = res.data['id']
+
+        download_url = reverse(
+            'requirementdocument-download', kwargs={'pk': doc_id}
+        )
+
+        # Student1 can download
+        dl_res = self.client.get(download_url)
+        self.assertEqual(dl_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(b"".join(dl_res.streaming_content), b"content")
+
+        # Student2 cannot download (due to queryset/object permissions)
+        self.client.force_authenticate(user=self.student2)
+        dl_res2 = self.client.get(download_url)
+        self.assertEqual(dl_res2.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Admin can download
+        self.client.force_authenticate(user=self.admin)
+        dl_res3 = self.client.get(download_url)
+        self.assertEqual(dl_res3.status_code, status.HTTP_200_OK)

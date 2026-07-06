@@ -1,6 +1,6 @@
 from django.db import transaction
 from audit.services import AuditService
-from .models import CredentialType, CredentialRequest
+from .models import CredentialType, CredentialRequest, RequirementDocument
 
 
 class CredentialTypeService:
@@ -102,3 +102,24 @@ class CredentialRequestService:
             }
         )
         return credential_request
+
+
+class RequirementDocumentService:
+    @staticmethod
+    @transaction.atomic
+    def upload_document(actor, validated_data):
+        document = RequirementDocument.objects.create(**validated_data)
+
+        AuditService.log_action(
+            actor=actor,
+            action='DOCUMENT_UPLOADED',
+            object_type='RequirementDocument',
+            object_id=document.id,
+            previous_state=None,
+            new_state={
+                'request': str(document.request.id),
+                'document_type': document.document_type,
+                'file_name': document.file.name
+            }
+        )
+        return document
