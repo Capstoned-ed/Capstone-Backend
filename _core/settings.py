@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Initialize environ
 env = environ.Env(
-    DEBUG=(bool, False)
+    DEBUG=(bool, True)
 )
 # Read .env file if it exists
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'accounts',
     'audit',
+    'credentials',
 ]
 
 MIDDLEWARE = [
