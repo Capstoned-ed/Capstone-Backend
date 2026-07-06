@@ -1,5 +1,5 @@
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 
@@ -86,17 +86,19 @@ class CredentialRequest(models.Model):
     def save(self, *args, **kwargs):
         if not self.tracking_number:
             year = timezone.now().year
-            last_request = CredentialRequest.objects.filter(
-                tracking_number__startswith=f'REQ-{year}-'
-            ).order_by('-tracking_number').first()
 
-            if last_request:
-                last_sequence = int(last_request.tracking_number.split('-')[-1])
-                new_sequence = last_sequence + 1
-            else:
-                new_sequence = 1
+            with transaction.atomic():
+                last_request = CredentialRequest.objects.select_for_update().filter(
+                    tracking_number__startswith=f'REQ-{year}-'
+                ).order_by('-tracking_number').first()
 
-            self.tracking_number = f'REQ-{year}-{new_sequence:06d}'
+                if last_request:
+                    last_sequence = int(last_request.tracking_number.split('-')[-1])
+                    new_sequence = last_sequence + 1
+                else:
+                    new_sequence = 1
+
+                self.tracking_number = f'REQ-{year}-{new_sequence:06d}'
 
         super().save(*args, **kwargs)
 
