@@ -26,8 +26,9 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         Mark a single notification as read.
         """
         notification = self.get_object()
-        notification.is_read = True
-        notification.save(update_fields=['is_read'])
+        if not notification.is_read:
+            notification.is_read = True
+            notification.save(update_fields=['is_read'])
         return Response(NotificationSerializer(notification).data)
 
     @extend_schema(responses={200: dict})
