@@ -161,15 +161,20 @@ class StudentClearanceService:
     @staticmethod
     @transaction.atomic
     def submit_clearance(actor, file):
-        clearance, created = StudentClearance.objects.get_or_create(
-            user=actor,
-            defaults={'file': file, 'status': ClearanceStatus.PENDING}
-        )
+        clearance = StudentClearance.objects.filter(user=actor).first()
 
-        if not created:
+        if clearance:
+            if clearance.status == ClearanceStatus.APPROVED:
+                raise ValidationError(
+                    "You cannot re-submit an already approved clearance."
+                )
             clearance.file = file
             clearance.status = ClearanceStatus.PENDING
             clearance.save()
+        else:
+            clearance = StudentClearance.objects.create(
+                user=actor, file=file, status=ClearanceStatus.PENDING
+            )
 
         AuditService.log_action(
             actor=actor,
@@ -193,6 +198,9 @@ class StudentClearanceService:
 
         if clearance.status != ClearanceStatus.PENDING:
             raise ValidationError("Only PENDING clearances can be reviewed.")
+
+        if status == ClearanceStatus.REJECTED and not remarks:
+            raise ValidationError("Remarks are required when rejecting a clearance.")
 
         previous_state = {
             'status': clearance.status,

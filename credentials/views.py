@@ -255,6 +255,12 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
         if request.user.role == Role.STUDENT and clearance.user != request.user:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
+        if not clearance.file or not clearance.file.storage.exists(clearance.file.name):
+            return Response(
+                {"detail": "File not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         filename = clearance.file.name.split('/')[-1]
         return FileResponse(
             clearance.file.open('rb'),
