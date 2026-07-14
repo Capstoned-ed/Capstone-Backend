@@ -69,3 +69,31 @@ class RequirementDocumentPermission(permissions.BasePermission):
         if request.user.role == Role.STUDENT:
             return obj.request.user == request.user
         return True
+
+
+class StudentClearancePermission(permissions.BasePermission):
+    """
+    Permissions for StudentClearance:
+    - POST: Only Students can upload clearances.
+    - PATCH (review): Only Staff and Admins.
+    - SAFE_METHODS: Students can view their own, Staff/Admins can view all.
+    """
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+
+        if request.method == 'POST':
+            return request.user.role == Role.STUDENT
+
+        if request.method in ['PUT', 'PATCH']:
+            # Assume detail view for review. Only Staff and Admin.
+            return request.user.role in [Role.STAFF, Role.ADMIN]
+
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.role == Role.STUDENT:
+            return obj.user == request.user
+        if request.user.role in [Role.STAFF, Role.ADMIN]:
+            return True
+        return False

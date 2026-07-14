@@ -1,5 +1,10 @@
 from rest_framework import serializers
-from .models import CredentialType, CredentialRequest, RequirementDocument
+from .models import (
+    CredentialType,
+    CredentialRequest,
+    RequirementDocument,
+    StudentClearance
+)
 
 
 class CredentialTypeSerializer(serializers.ModelSerializer):
@@ -67,3 +72,34 @@ class RequirementDocumentSerializer(serializers.ModelSerializer):
                 "You can only upload documents to your own credential requests."
             )
         return value
+
+
+class StudentClearanceSerializer(serializers.ModelSerializer):
+    """
+    Read-only representation of a StudentClearance.
+    """
+    class Meta:
+        model = StudentClearance
+        fields = [
+            'id', 'user', 'status', 'file', 'remarks',
+            'reviewed_by', 'reviewed_at', 'uploaded_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+
+class StudentClearanceSubmitSerializer(serializers.ModelSerializer):
+    """
+    Validation layer for a student submitting an e-Clearance.
+    """
+    class Meta:
+        model = StudentClearance
+        fields = ['file']
+
+
+class StudentClearanceReviewSerializer(serializers.ModelSerializer):
+    """
+    Validation layer for staff reviewing a student clearance.
+    """
+    class Meta:
+        model = StudentClearance
+        fields = ['status', 'remarks']

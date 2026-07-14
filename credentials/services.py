@@ -2,7 +2,15 @@ from django.db import transaction
 from audit.services import AuditService
 from notifications.services import NotificationService
 from notifications.models import NotificationEvent
-from .models import CredentialType, CredentialRequest, RequirementDocument
+from .models import (
+    CredentialType,
+    CredentialRequest,
+    RequirementDocument,
+    StudentClearance,
+    ClearanceStatus
+)
+from rest_framework.exceptions import ValidationError
+from django.utils import timezone
 
 
 class CredentialTypeService:
@@ -87,6 +95,15 @@ class CredentialRequestService:
     @staticmethod
     @transaction.atomic
     def create_request(actor, validated_data):
+        has_clearance = StudentClearance.objects.filter(
+            user=actor, status=ClearanceStatus.APPROVED
+        ).exists()
+
+        if not has_clearance:
+            raise ValidationError(
+                "You must have an APPROVED clearance to create a request."
+            )
+
         validated_data['user'] = actor
         credential_request = CredentialRequest.objects.create(**validated_data)
 
@@ -138,3 +155,97 @@ class RequirementDocumentService:
             }
         )
         return document
+
+
+class StudentClearanceService:
+    @staticmethod
+    @transaction.atomic
+    def submit_clearance(actor, file):
+        clearance = StudentClearance.objects.filter(user=actor).first()
+
+        if clearance:
+            if clearance.status == ClearanceStatus.APPROVED:
+                raise ValidationError(
+                    "You cannot re-submit an already approved clearance."
+                )
+            clearance.file = file
+            clearance.status = ClearanceStatus.PENDING
+            clearance.save()
+        else:
+            clearance = StudentClearance.objects.create(
+                user=actor, file=file, status=ClearanceStatus.PENDING
+            )
+
+        AuditService.log_action(
+            actor=actor,
+            action='CLEARANCE_SUBMITTED',
+            object_type='StudentClearance',
+            object_id=clearance.id,
+            previous_state=None,
+            new_state={
+                'user': str(actor.id),
+                'status': clearance.status,
+                'file_name': clearance.file.name
+            }
+        )
+        return clearance
+
+    @staticmethod
+    @transaction.atomic
+    def review_clearance(actor, clearance, status, remarks=""):
+        if status not in [ClearanceStatus.APPROVED, ClearanceStatus.REJECTED]:
+            raise ValidationError("Invalid clearance status.")
+
+        if clearance.status != ClearanceStatus.PENDING:
+            raise ValidationError("Only PENDING clearances can be reviewed.")
+
+        if status == ClearanceStatus.REJECTED and not remarks:
+            raise ValidationError("Remarks are required when rejecting a clearance.")
+
+        previous_state = {
+            'status': clearance.status,
+            'remarks': clearance.remarks
+        }
+
+        clearance.status = status
+        clearance.remarks = remarks
+        clearance.reviewed_by = actor
+        clearance.reviewed_at = timezone.now()
+        clearance.save()
+
+        new_state = {
+            'status': clearance.status,
+            'remarks': clearance.remarks,
+            'reviewed_by': str(actor.id)
+        }
+
+        audit_action = (
+            'CLEARANCE_APPROVED' if status == ClearanceStatus.APPROVED
+            else 'CLEARANCE_REJECTED'
+        )
+
+        AuditService.log_action(
+            actor=actor,
+            action=audit_action,
+            object_type='StudentClearance',
+            object_id=clearance.id,
+            previous_state=previous_state,
+            new_state=new_state
+        )
+
+        notification_event = (
+            NotificationEvent.CLEARANCE_APPROVED
+            if status == ClearanceStatus.APPROVED
+            else NotificationEvent.CLEARANCE_REJECTED
+        )
+        msg = f"Your student clearance has been {status.lower()}."
+
+        NotificationService.create_notification(
+            recipient=clearance.user,
+            event_type=notification_event,
+            message=msg,
+            related_object_type='StudentClearance',
+            related_object_id=str(clearance.id)
+        )
+
+        return clearance

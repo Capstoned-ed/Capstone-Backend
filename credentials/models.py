@@ -134,3 +134,48 @@ class RequirementDocument(models.Model):
 
     def __str__(self):
         return f"{self.document_type} for {self.request.tracking_number}"
+
+
+class ClearanceStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    APPROVED = 'APPROVED', 'Approved'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
+def clearance_upload_path(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    return f"clearances/{instance.user.id}/{filename}"
+
+
+class StudentClearance(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='clearance'
+    )
+    status = models.CharField(
+        max_length=50,
+        choices=ClearanceStatus.choices,
+        default=ClearanceStatus.PENDING
+    )
+    file = models.FileField(
+        upload_to=clearance_upload_path,
+        storage=private_storage,
+        validators=[validate_file_size, validate_file_extension, validate_mime_type]
+    )
+    remarks = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_clearances'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Clearance for {self.user.username} - {self.status}"
