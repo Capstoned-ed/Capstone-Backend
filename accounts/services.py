@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from audit.services import AuditService
+from notifications.services import NotificationService
+from notifications.models import NotificationEvent
 
 User = get_user_model()
 
@@ -35,6 +37,18 @@ class AccountService:
                 'force_password_change': user.force_password_change
             }
         )
+
+        NotificationService.create_notification(
+            recipient=user,
+            event_type=NotificationEvent.ACCOUNT_CREATED,
+            message=(
+                "Your account has been provisioned. "
+                "Please update your temporary password."
+            ),
+            related_object_type='User',
+            related_object_id=str(user.id)
+        )
+
         return user
 
     @staticmethod

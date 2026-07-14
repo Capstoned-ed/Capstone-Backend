@@ -1,5 +1,7 @@
 from django.db import transaction
 from audit.services import AuditService
+from notifications.services import NotificationService
+from notifications.models import NotificationEvent
 from .models import CredentialType, CredentialRequest, RequirementDocument
 
 
@@ -101,6 +103,19 @@ class CredentialRequestService:
                 'remarks': credential_request.remarks
             }
         )
+
+        msg = (
+            f"Your credential request ({credential_request.tracking_number}) "
+            "has been created."
+        )
+        NotificationService.create_notification(
+            recipient=actor,
+            event_type=NotificationEvent.REQUEST_CREATED,
+            message=msg,
+            related_object_type='CredentialRequest',
+            related_object_id=str(credential_request.id)
+        )
+
         return credential_request
 
 
