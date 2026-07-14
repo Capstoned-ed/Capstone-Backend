@@ -108,6 +108,11 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         qs = CredentialRequest.objects.select_related(
             'user', 'credential_type'
         ).order_by('-created_at')
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+
         user = self.request.user
 
         if user.is_authenticated and user.role == Role.STUDENT:
@@ -138,6 +143,29 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    @extend_schema(responses={200: CredentialRequestSerializer})
+    @action(detail=True, methods=['patch'])
+    def transition(self, request, pk=None):
+        credential_request = self.get_object()
+
+        new_status = request.data.get('status')
+        remarks = request.data.get('remarks', '')
+
+        if not new_status:
+            return Response(
+                {"detail": "status is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated_request = CredentialRequestService.transition_request(
+            actor=request.user,
+            credential_request=credential_request,
+            new_status=new_status,
+            remarks=remarks
+        )
+
+        return Response(CredentialRequestSerializer(updated_request).data)
 
 
 class RequirementDocumentViewSet(viewsets.ModelViewSet):

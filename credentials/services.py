@@ -7,10 +7,12 @@ from .models import (
     CredentialRequest,
     RequirementDocument,
     StudentClearance,
-    ClearanceStatus
+    ClearanceStatus,
+    RequestStatus
 )
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
+from accounts.models import Role
 
 
 class CredentialTypeService:
@@ -92,6 +94,44 @@ class CredentialTypeService:
 
 
 class CredentialRequestService:
+    TRANSITION_MATRIX = {
+        RequestStatus.PENDING: [
+            {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
+                'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
+        ],
+        RequestStatus.REQUIREMENTS_VERIFICATION: [
+            {'status': RequestStatus.PAYMENT_PENDING,
+                'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.REQUIREMENTS_REJECTED,
+                'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+        ],
+        RequestStatus.REQUIREMENTS_REJECTED: [
+            {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
+            {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
+        ],
+        RequestStatus.PAYMENT_PENDING: [
+            {'status': RequestStatus.PAYMENT_VERIFIED,
+                'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
+            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+        ],
+        RequestStatus.PAYMENT_VERIFIED: [
+            {'status': RequestStatus.PROCESSING, 'roles': [
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN]}
+        ],
+        RequestStatus.PROCESSING: [
+            {'status': RequestStatus.READY_FOR_RELEASE,
+                'roles': [Role.REGISTRAR, Role.ADMIN]},
+            {'status': RequestStatus.REJECTED, 'roles': [Role.REGISTRAR, Role.ADMIN]}
+        ],
+        RequestStatus.READY_FOR_RELEASE: [
+            {'status': RequestStatus.RELEASED, 'roles': [
+                Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
+        ]
+    }
+
     @staticmethod
     @transaction.atomic
     def create_request(actor, validated_data):
@@ -132,6 +172,69 @@ class CredentialRequestService:
             related_object_type='CredentialRequest',
             related_object_id=str(credential_request.id)
         )
+
+        return credential_request
+
+    @staticmethod
+    @transaction.atomic
+    def transition_request(actor, credential_request, new_status, remarks=""):
+        current_status = credential_request.status
+        allowed_transitions = CredentialRequestService.TRANSITION_MATRIX.get(
+            current_status, [])
+
+        transition = next(
+            (t for t in allowed_transitions if t['status'] == new_status), None)
+
+        if not transition:
+            raise ValidationError(
+                f"Invalid transition from {current_status} to {new_status}.")
+
+        if actor.role not in transition['roles']:
+            raise ValidationError(
+                "You do not have permission to perform this transition.")
+
+        if new_status in [
+            RequestStatus.REJECTED,
+            RequestStatus.REQUIREMENTS_REJECTED
+        ] and not remarks:
+            raise ValidationError("Remarks are required when rejecting a request.")
+
+        previous_state = {
+            'status': credential_request.status,
+            'remarks': credential_request.remarks
+        }
+
+        credential_request.status = new_status
+        if remarks:
+            credential_request.remarks = remarks
+        credential_request.save()
+
+        new_state = {
+            'status': credential_request.status,
+            'remarks': credential_request.remarks
+        }
+
+        AuditService.log_action(
+            actor=actor,
+            action=f'REQUEST_STATUS_CHANGED_{new_status}',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state=previous_state,
+            new_state=new_state
+        )
+
+        if actor.role != Role.STUDENT:
+            msg = (
+                f"Your request ({credential_request.tracking_number}) "
+                f"status changed to {new_status}."
+            )
+            NotificationService.create_notification(
+                recipient=credential_request.user,
+                event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                message=msg,
+                related_object_type='CredentialRequest',
+                related_object_id=str(credential_request.id)
+            )
 
         return credential_request
 
