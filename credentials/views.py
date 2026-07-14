@@ -4,22 +4,32 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
-from .models import CredentialType, CredentialRequest, RequirementDocument
+from .models import (
+    CredentialType,
+    CredentialRequest,
+    RequirementDocument,
+    StudentClearance
+)
 from .serializers import (
     CredentialTypeSerializer,
     CredentialTypeCreateUpdateSerializer,
     CredentialRequestSerializer,
-    RequirementDocumentSerializer
+    RequirementDocumentSerializer,
+    StudentClearanceSerializer,
+    StudentClearanceSubmitSerializer,
+    StudentClearanceReviewSerializer
 )
 from .permissions import (
     IsAdminOrRegistrarOrReadOnly,
     CredentialRequestPermission,
-    RequirementDocumentPermission
+    RequirementDocumentPermission,
+    StudentClearancePermission
 )
 from .services import (
     CredentialTypeService,
     CredentialRequestService,
-    RequirementDocumentService
+    RequirementDocumentService,
+    StudentClearanceService
 )
 from accounts.models import Role
 
@@ -179,6 +189,86 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class StudentClearanceViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing student clearances.
+    """
+    permission_classes = [StudentClearancePermission]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        qs = StudentClearance.objects.select_related('user').order_by('-updated_at')
+        user = self.request.user
+
+        if user.is_authenticated and user.role == Role.STUDENT:
+            return qs.filter(user=user)
+
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return StudentClearanceSubmitSerializer
+        if self.action == 'review':
+            return StudentClearanceReviewSerializer
+        return StudentClearanceSerializer
+
+    @extend_schema(responses={201: StudentClearanceSerializer})
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        clearance = StudentClearanceService.submit_clearance(
+            actor=request.user,
+            file=serializer.validated_data['file']
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            StudentClearanceSerializer(clearance).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @extend_schema(responses={200: StudentClearanceSerializer})
+    @action(detail=True, methods=['patch'])
+    def review(self, request, pk=None):
+        clearance = self.get_object()
+        serializer = self.get_serializer(clearance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        updated_clearance = StudentClearanceService.review_clearance(
+            actor=request.user,
+            clearance=clearance,
+            status=serializer.validated_data.get('status'),
+            remarks=serializer.validated_data.get('remarks', '')
+        )
+        return Response(StudentClearanceSerializer(updated_clearance).data)
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        clearance = self.get_object()
+
+        # Strict Ownership Check for Download
+        if request.user.role == Role.STUDENT and clearance.user != request.user:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        filename = clearance.file.name.split('/')[-1]
+        return FileResponse(
+            clearance.file.open('rb'),
+            as_attachment=True,
+            filename=filename
+        )
+
+    def update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def partial_update(self, request, *args, **kwargs):
+        if self.action != 'review':
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
