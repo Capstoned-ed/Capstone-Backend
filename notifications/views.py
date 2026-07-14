@@ -2,9 +2,16 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
 from drf_spectacular.utils import extend_schema
 from .models import Notification
 from .serializers import NotificationSerializer
+
+
+class NotificationPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
@@ -14,8 +21,13 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     """
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = NotificationPagination
 
     def get_queryset(self):
+        # Prevent crash during OpenAPI schema generation with AnonymousUser
+        if not getattr(self.request.user, 'is_authenticated', False):
+            return Notification.objects.none()
+
         # Strict data isolation: Users can only see their own notifications
         return Notification.objects.filter(user=self.request.user)
 

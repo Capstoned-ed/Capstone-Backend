@@ -54,15 +54,15 @@ class NotificationAPITests(APITestCase):
         self.client.force_authenticate(user=self.user1)
         res = self.client.get(self.url_list)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(res.data), 2)
+        self.assertEqual(len(res.data['results']), 2)
         # Should be ordered by -created_at
-        self.assertEqual(res.data[0]['id'], str(self.notif2.id))
-        self.assertEqual(res.data[1]['id'], str(self.notif1.id))
+        self.assertEqual(res.data['results'][0]['id'], str(self.notif2.id))
+        self.assertEqual(res.data['results'][1]['id'], str(self.notif1.id))
 
     def test_cannot_view_another_users_notifications(self):
         self.client.force_authenticate(user=self.user1)
         res = self.client.get(self.url_list)
-        ids = [n['id'] for n in res.data]
+        ids = [n['id'] for n in res.data['results']]
         self.assertNotIn(str(self.notif3.id), ids)
 
         # Direct access should be 404

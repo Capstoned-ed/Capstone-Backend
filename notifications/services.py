@@ -16,11 +16,13 @@ class NotificationService:
         """
         Creates a notification synchronously.
         """
-        notification = Notification.objects.create(
+        notification = Notification(
             user=recipient,
             event_type=event_type,
             message=message,
             related_object_type=related_object_type,
             related_object_id=related_object_id
         )
+        notification.full_clean()
+        notification.save()
         return notification
