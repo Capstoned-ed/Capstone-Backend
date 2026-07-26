@@ -147,8 +147,8 @@ class CredentialRequestAPITests(APITestCase):
         url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
         response = self.client.patch(
             url, {'status': 'REQUIREMENTS_VERIFICATION'}, format='json')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('permission', response.data[0].lower())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('permission', response.data['detail'].lower())
 
     def test_transition_requires_remarks_for_rejection(self):
         """Staff rejecting a request without remarks should fail."""
