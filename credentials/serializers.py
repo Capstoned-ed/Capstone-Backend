@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.urls import reverse
 from .models import (
     CredentialType,
     CredentialRequest,
@@ -33,18 +34,43 @@ class CredentialTypeCreateUpdateSerializer(serializers.ModelSerializer):
         ]
 
 
+class NestedRequirementDocumentSerializer(serializers.ModelSerializer):
+    """
+    Read-only, minimal representation of a RequirementDocument
+    for embedding inside a CredentialRequest payload.
+    """
+    file = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RequirementDocument
+        fields = ['id', 'document_type', 'file', 'uploaded_at']
+        read_only_fields = ['id', 'document_type', 'file', 'uploaded_at']
+
+    def get_file(self, obj):
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(
+                reverse('requirementdocument-download', kwargs={'pk': obj.pk})
+            )
+        return None
+
+
 class CredentialRequestSerializer(serializers.ModelSerializer):
     """
     Representation of a CredentialRequest.
     """
+    documents = NestedRequirementDocumentSerializer(many=True, read_only=True)
+
     class Meta:
         model = CredentialRequest
         fields = [
             'id', 'user', 'credential_type', 'status',
-            'tracking_number', 'remarks', 'created_at', 'updated_at'
+            'tracking_number', 'remarks', 'created_at', 'updated_at',
+            'documents'
         ]
         read_only_fields = [
-            'user', 'status', 'tracking_number', 'created_at', 'updated_at'
+            'user', 'status', 'tracking_number', 'created_at', 'updated_at',
+            'documents'
         ]
 
     def validate_credential_type(self, value):
