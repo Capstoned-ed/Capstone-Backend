@@ -177,7 +177,10 @@ class CredentialRequestService:
 
     @staticmethod
     @transaction.atomic
+    @staticmethod
+    @transaction.atomic
     def transition_request(actor, credential_request, new_status, remarks=""):
+        credential_request = CredentialRequest.objects.select_for_update().get(pk=credential_request.pk)
         current_status = credential_request.status
         allowed_transitions = CredentialRequestService.TRANSITION_MATRIX.get(
             current_status, [])
