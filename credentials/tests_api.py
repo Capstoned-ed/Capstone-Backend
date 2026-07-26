@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from accounts.models import Role
-from .models import CredentialType, CredentialRequest
+from .models import CredentialType, CredentialRequest, StudentClearance, ClearanceStatus
 from audit.models import AuditLog
 from decimal import Decimal
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -38,6 +38,13 @@ class CredentialRequestAPITests(APITestCase):
         )
         self.req2 = CredentialRequest.objects.create(
             user=self.student2, credential_type=self.ctype
+        )
+
+        StudentClearance.objects.create(
+            user=self.student1,
+            status=ClearanceStatus.APPROVED,
+            file=SimpleUploadedFile("dummy.pdf", b"content",
+                                    content_type="application/pdf")
         )
 
         self.url_list = reverse('credentialrequest-list')
@@ -112,8 +119,46 @@ class CredentialRequestAPITests(APITestCase):
         response = self.client.delete(self.url_detail1)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-        response = self.client.patch(self.url_detail1, {'remarks': 'test'})
+        response = self.client.put(self.url_detail1, {'remarks': 'test'})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_transition_endpoint_success(self):
+        """Staff can transition PENDING to REQUIREMENTS_VERIFICATION."""
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'REQUIREMENTS_VERIFICATION'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'REQUIREMENTS_VERIFICATION')
+
+    def test_transition_endpoint_student_cancel(self):
+        """Student can cancel their own PENDING request."""
+        self.client.force_authenticate(user=self.student1)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(url, {'status': 'CANCELLED'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'CANCELLED')
+
+    def test_transition_endpoint_unauthorized_role(self):
+        """Student cannot transition PENDING to REQUIREMENTS_VERIFICATION."""
+        self.client.force_authenticate(user=self.student1)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'REQUIREMENTS_VERIFICATION'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('permission', response.data['detail'].lower())
+
+    def test_transition_requires_remarks_for_rejection(self):
+        """Staff rejecting a request without remarks should fail."""
+        self.req1.status = 'REQUIREMENTS_VERIFICATION'
+        self.req1.save()
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(url, {'status': 'REJECTED'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('remarks', response.data[0].lower())
 
 
 class RequirementDocumentAPITests(APITestCase):

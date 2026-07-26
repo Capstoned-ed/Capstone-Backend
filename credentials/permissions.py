@@ -7,6 +7,7 @@ class IsAdminOrRegistrarOrReadOnly(permissions.BasePermission):
     Custom permission to only allow Admins or Registrars to edit it.
     Read-only permissions are allowed for any authenticated request.
     """
+
     def has_permission(self, request, view):
         # Read permissions are allowed to any authenticated request,
         if request.method in permissions.SAFE_METHODS:
@@ -27,12 +28,16 @@ class CredentialRequestPermission(permissions.BasePermission):
       (filtered by queryset/object perms).
     - Object level: Students can only access their own requests. Others can access all.
     """
+
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
 
         if request.method == 'POST':
             return request.user.role == Role.STUDENT
+
+        if request.method == 'PATCH' and view.action == 'transition':
+            return True
 
         if request.method not in permissions.SAFE_METHODS:
             return False
@@ -53,6 +58,7 @@ class RequirementDocumentPermission(permissions.BasePermission):
       (filtered by queryset/object perms).
     - Object level: Students can only access documents for their own requests.
     """
+
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
@@ -78,6 +84,7 @@ class StudentClearancePermission(permissions.BasePermission):
     - PATCH (review): Only Staff and Admins.
     - SAFE_METHODS: Students can view their own, Staff/Admins can view all.
     """
+
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
