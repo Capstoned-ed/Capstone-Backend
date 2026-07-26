@@ -107,6 +107,8 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = CredentialRequest.objects.select_related(
             'user', 'credential_type'
+        ).prefetch_related(
+            'documents'
         ).order_by('-created_at')
 
         status_param = self.request.query_params.get('status')
