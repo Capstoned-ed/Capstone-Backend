@@ -193,7 +193,7 @@ class CredentialRequestService:
                 f"Invalid transition from {current_status} to {new_status}.")
 
         if actor.role not in transition['roles']:
-            raise ValidationError(
+            raise PermissionDenied(
                 "You do not have permission to perform this transition.")
 
         if new_status in [
