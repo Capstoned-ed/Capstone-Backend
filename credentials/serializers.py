@@ -104,6 +104,8 @@ class StudentClearanceSerializer(serializers.ModelSerializer):
     """
     Read-only representation of a StudentClearance.
     """
+    file = serializers.SerializerMethodField()
+
     class Meta:
         model = StudentClearance
         fields = [
@@ -111,6 +113,14 @@ class StudentClearanceSerializer(serializers.ModelSerializer):
             'reviewed_by', 'reviewed_at', 'uploaded_at', 'updated_at'
         ]
         read_only_fields = fields
+
+    def get_file(self, obj):
+        request = self.context.get('request')
+        if request and obj.file:
+            return request.build_absolute_uri(
+                reverse('studentclearance-download', kwargs={'pk': obj.pk})
+            )
+        return None
 
 
 class StudentClearanceSubmitSerializer(serializers.ModelSerializer):

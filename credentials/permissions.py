@@ -37,7 +37,9 @@ class CredentialRequestPermission(permissions.BasePermission):
             return request.user.role == Role.STUDENT
 
         if request.method == 'PATCH':
-            return True
+            return request.user.role in [
+                Role.STAFF, Role.REGISTRAR, Role.ADMIN, Role.STUDENT
+            ]
 
         if request.method not in permissions.SAFE_METHODS:
             return False

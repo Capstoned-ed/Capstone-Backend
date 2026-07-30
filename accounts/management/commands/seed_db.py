@@ -1,3 +1,4 @@
+import os
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from accounts.models import Role
@@ -5,6 +6,8 @@ from accounts.services import AccountService
 from audit.models import AuditLog
 
 User = get_user_model()
+
+DEFAULT_PASSWORD = os.environ.get('SEED_PASSWORD', 'password123')
 
 
 class Command(BaseCommand):
@@ -18,6 +21,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self.stdout.write(
+            self.style.WARNING(
+                '⚠️  Seeding with default password. '
+                'Set SEED_PASSWORD env var to override.'
+            )
+        )
+
         if options['clear']:
             self.stdout.write('Clearing existing users and audit logs...')
             AuditLog.objects.all().delete()
@@ -41,7 +51,7 @@ class Command(BaseCommand):
         admin_user = User.objects.create_superuser(
             username=admin_username,
             email='admin@example.com',
-            password='password123'
+            password=DEFAULT_PASSWORD
         )
 
         # 2. Use AccountService to create other roles, using Admin as the actor
@@ -57,7 +67,7 @@ class Command(BaseCommand):
                 actor=admin_user,
                 username=username,
                 email=email,
-                password='password123',
+                password=DEFAULT_PASSWORD,
                 role=role
             )
 
