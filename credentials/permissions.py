@@ -106,3 +106,32 @@ class StudentClearancePermission(permissions.BasePermission):
         if request.user.role in [Role.STAFF, Role.ADMIN]:
             return True
         return False
+
+
+class PaymentPermission(permissions.BasePermission):
+    """
+    Permissions for Payment:
+    - POST: Students (for their own requests).
+    - PATCH (verify): Staff and Admin only.
+    - SAFE_METHODS: All authenticated users (filtered by queryset).
+    """
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+
+        if request.method == 'POST':
+            return request.user.role == Role.STUDENT
+
+        if request.method == 'PATCH' and view.action == 'verify':
+            return request.user.role in [Role.STAFF, Role.ADMIN]
+
+        if request.method not in permissions.SAFE_METHODS:
+            return False
+
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.role == Role.STUDENT:
+            return obj.request.user == request.user
+        return True

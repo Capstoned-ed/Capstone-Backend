@@ -26,7 +26,8 @@ from .permissions import (
     IsAdminOrRegistrarOrReadOnly,
     CredentialRequestPermission,
     RequirementDocumentPermission,
-    StudentClearancePermission
+    StudentClearancePermission,
+    PaymentPermission
 )
 from .services import (
     CredentialTypeService,
@@ -42,6 +43,7 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing credential types.
     """
+    # Base queryset for router URL introspection; actual filtering in get_queryset().
     queryset = CredentialType.objects.all().order_by('name')
     permission_classes = [IsAdminOrRegistrarOrReadOnly]
 
@@ -112,7 +114,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         qs = CredentialRequest.objects.select_related(
             'user', 'credential_type'
         ).prefetch_related(
-            'payments'
+            'payments',
             'documents'
         ).order_by('-created_at')
 
@@ -212,6 +214,13 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         document = self.get_object()
+
+        if not document.file or not document.file.storage.exists(document.file.name):
+            return Response(
+                {"detail": "Document file not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         filename = Path(document.file.name).name
         return FileResponse(
             document.file.open('rb'),
@@ -318,6 +327,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     API endpoint for managing OTC payments.
     """
     serializer_class = PaymentSerializer
+    permission_classes = [PaymentPermission]
 
     def get_queryset(self):
         qs = Payment.objects.select_related(
@@ -360,7 +370,15 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if request.user.role == Role.STUDENT and payment.request.user != request.user:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        filename = payment.receipt_image.name.split('/')[-1]
+        if not payment.receipt_image or not payment.receipt_image.storage.exists(
+            payment.receipt_image.name
+        ):
+            return Response(
+                {"detail": "Receipt file not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        filename = Path(payment.receipt_image.name).name
         return FileResponse(
             payment.receipt_image.open('rb'),
             as_attachment=True,
@@ -371,9 +389,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'])
     def verify(self, request, pk=None):
         payment = self.get_object()
-
-        if request.user.role == Role.STUDENT:
-            return Response(status=status.HTTP_403_FORBIDDEN)
 
         action_type = request.data.get('action')
         remarks = request.data.get('remarks', '')

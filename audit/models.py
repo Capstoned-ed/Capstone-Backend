@@ -51,6 +51,14 @@ class AuditLog(models.Model):
             models.Index(fields=['actor']),
         ]
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise PermissionError("AuditLog records are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError("AuditLog records cannot be deleted.")
+
     def __str__(self):
         return (
             f"{self.timestamp} - {self.action} "

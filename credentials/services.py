@@ -378,10 +378,19 @@ class PaymentService:
     def submit_payment(
         actor, request, amount, receipt_image, receipt_reference_number=""
     ):
+        request = CredentialRequest.objects.select_for_update().get(pk=request.pk)
+
         if request.status != RequestStatus.PAYMENT_PENDING:
             raise ValidationError(
                 "You can only submit an OTC payment when the request is "
                 "awaiting payment."
+            )
+
+        if Payment.objects.filter(
+            request=request, status=PaymentStatus.PENDING
+        ).exists():
+            raise ValidationError(
+                "A payment submission is already pending review for this request."
             )
 
         payment = Payment.objects.create(
@@ -444,6 +453,9 @@ class PaymentService:
         )
 
         if action == 'VERIFY':
+            # This call is nested within verify_payment's atomic block.
+            # Django creates a savepoint here; the select_for_update in
+            # transition_request operates within the same connection and lock scope.
             CredentialRequestService.transition_request(
                 actor=actor,
                 credential_request=payment.request,
