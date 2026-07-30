@@ -113,20 +113,20 @@ class RequirementDocumentSerializer(serializers.ModelSerializer):
     """
     Representation of a RequirementDocument.
     """
-    file = serializers.SerializerMethodField()
-
     class Meta:
         model = RequirementDocument
         fields = ['id', 'request', 'document_type', 'file', 'uploaded_at']
         read_only_fields = ['id', 'uploaded_at']
 
-    def get_file(self, obj):
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
         request = self.context.get('request')
-        if request and obj.file:
-            return request.build_absolute_uri(
-                reverse('requirementdocument-download', kwargs={'pk': obj.pk})
+        file_obj = getattr(instance, 'file', None)
+        if request and file_obj:
+            ret['file'] = request.build_absolute_uri(
+                reverse('requirementdocument-download', kwargs={'pk': instance.pk})
             )
-        return None
+        return ret
 
     def validate_request(self, value):
         user = self.context['request'].user
@@ -192,8 +192,6 @@ class PaymentSerializer(serializers.ModelSerializer):
     """
     Representation of a Payment.
     """
-    receipt_image = serializers.SerializerMethodField()
-
     class Meta:
         model = Payment
         fields = [
@@ -206,13 +204,15 @@ class PaymentSerializer(serializers.ModelSerializer):
             'uploaded_at', 'updated_at'
         ]
 
-    def get_receipt_image(self, obj):
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
         request = self.context.get('request')
-        if request and obj.receipt_image:
-            return request.build_absolute_uri(
-                reverse('payment-download', kwargs={'pk': obj.pk})
+        receipt_image = getattr(instance, 'receipt_image', None)
+        if request and receipt_image:
+            ret['receipt_image'] = request.build_absolute_uri(
+                reverse('payment-download', kwargs={'pk': instance.pk})
             )
-        return None
+        return ret
 
     def validate_request(self, value):
         user = self.context['request'].user
