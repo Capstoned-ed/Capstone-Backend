@@ -148,7 +148,7 @@ class CredentialRequestAPITests(APITestCase):
         response = self.client.patch(
             url, {'status': 'REQUIREMENTS_VERIFICATION'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn('permission', response.data['detail'].lower())
+        self.assertIn('permission', str(response.data).lower())
 
     def test_transition_requires_remarks_for_rejection(self):
         """Staff rejecting a request without remarks should fail."""

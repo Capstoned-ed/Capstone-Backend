@@ -36,6 +36,8 @@ class UserSerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     """
     Validation layer for creating a new user.
+    Note: Password hashing is delegated to AccountService.create_user (which calls
+    create_user()), so no custom create() override is needed here.
     """
     class Meta:
         model = User

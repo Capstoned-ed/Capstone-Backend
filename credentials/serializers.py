@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.urls import reverse
 from .models import (
     CredentialType,
     CredentialRequest,
@@ -57,6 +58,23 @@ class NestedPaymentSerializer(serializers.ModelSerializer):
         if request:
             return request.build_absolute_uri(
                 reverse('payment-download', kwargs={'pk': obj.pk})
+class NestedRequirementDocumentSerializer(serializers.ModelSerializer):
+    """
+    Read-only, minimal representation of a RequirementDocument
+    for embedding inside a CredentialRequest payload.
+    """
+    file = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RequirementDocument
+        fields = ['id', 'document_type', 'file', 'uploaded_at']
+        read_only_fields = ['id', 'document_type', 'file', 'uploaded_at']
+
+    def get_file(self, obj):
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(
+                reverse('requirementdocument-download', kwargs={'pk': obj.pk})
             )
         return None
 
@@ -66,6 +84,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     Representation of a CredentialRequest.
     """
     payments = NestedPaymentSerializer(many=True, read_only=True)
+    documents = NestedRequirementDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = CredentialRequest
@@ -75,6 +94,12 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at', 'payments'
+            'tracking_number', 'remarks', 'created_at', 'updated_at',
+            'documents'
+        ]
+        read_only_fields = [
+            'user', 'status', 'tracking_number', 'created_at', 'updated_at',
+            'documents'
         ]
 
     def validate_credential_type(self, value):
@@ -108,6 +133,8 @@ class StudentClearanceSerializer(serializers.ModelSerializer):
     """
     Read-only representation of a StudentClearance.
     """
+    file = serializers.SerializerMethodField()
+
     class Meta:
         model = StudentClearance
         fields = [
@@ -115,6 +142,14 @@ class StudentClearanceSerializer(serializers.ModelSerializer):
             'reviewed_by', 'reviewed_at', 'uploaded_at', 'updated_at'
         ]
         read_only_fields = fields
+
+    def get_file(self, obj):
+        request = self.context.get('request')
+        if request and obj.file:
+            return request.build_absolute_uri(
+                reverse('studentclearance-download', kwargs={'pk': obj.pk})
+            )
+        return None
 
 
 class StudentClearanceSubmitSerializer(serializers.ModelSerializer):

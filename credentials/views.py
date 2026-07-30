@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
+from pathlib import Path
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
 from .models import (
@@ -112,6 +113,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             'user', 'credential_type'
         ).prefetch_related(
             'payments'
+            'documents'
         ).order_by('-created_at')
 
         status_param = self.request.query_params.get('status')
@@ -210,7 +212,7 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         document = self.get_object()
-        filename = document.file.name.split('/')[-1]
+        filename = Path(document.file.name).name
         return FileResponse(
             document.file.open('rb'),
             as_attachment=True,
@@ -294,7 +296,7 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        filename = clearance.file.name.split('/')[-1]
+        filename = Path(clearance.file.name).name
         return FileResponse(
             clearance.file.open('rb'),
             as_attachment=True,
@@ -305,9 +307,7 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def partial_update(self, request, *args, **kwargs):
-        if self.action != 'review':
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        return super().partial_update(request, *args, **kwargs)
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def destroy(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

@@ -31,8 +31,13 @@ class UserViewSet(viewsets.ModelViewSet):
     API endpoint that allows admins to view or edit users.
     Supports soft deletion.
     """
-    queryset = User.objects.all().order_by('-date_joined')
     permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        qs = User.objects.all().order_by('-date_joined')
+        if self.request.user.is_authenticated and not self.request.user.is_superuser:
+            qs = qs.filter(is_superuser=False)
+        return qs
 
     def get_serializer_class(self):
         if self.action == 'create':

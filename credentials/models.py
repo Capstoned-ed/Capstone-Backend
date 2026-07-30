@@ -1,4 +1,5 @@
 import uuid
+import re
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
@@ -90,17 +91,16 @@ class CredentialRequest(models.Model):
             year = timezone.now().year
 
             with transaction.atomic():
-                last_request = CredentialRequest.objects.select_for_update().filter(
+                qs = CredentialRequest.objects.select_for_update().filter(
                     tracking_number__startswith=f'REQ-{year}-'
-                ).order_by('-tracking_number').first()
+                )
+                max_seq = 0
+                for obj in qs.only('tracking_number'):
+                    match = re.search(r'-(\d+)$', obj.tracking_number)
+                    if match:
+                        max_seq = max(max_seq, int(match.group(1)))
 
-                if last_request:
-                    last_sequence = int(last_request.tracking_number.split('-')[-1])
-                    new_sequence = last_sequence + 1
-                else:
-                    new_sequence = 1
-
-                self.tracking_number = f'REQ-{year}-{new_sequence:06d}'
+                self.tracking_number = f'REQ-{year}-{max_seq + 1:06d}'
 
         super().save(*args, **kwargs)
 
@@ -108,10 +108,14 @@ class CredentialRequest(models.Model):
         return f"{self.tracking_number} - {self.status}"
 
 
-def document_upload_path(instance, filename):
+def private_upload_path(subfolder, target_id, filename):
     ext = filename.split('.')[-1] if '.' in filename else ''
-    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
-    return f"requests/{instance.request.id}/{filename}"
+    new_filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    return f"{subfolder}/{target_id}/{new_filename}"
+
+
+def document_upload_path(instance, filename):
+    return private_upload_path("requests", instance.request.id, filename)
 
 
 class RequirementDocument(models.Model):
@@ -143,9 +147,7 @@ class ClearanceStatus(models.TextChoices):
 
 
 def clearance_upload_path(instance, filename):
-    ext = filename.split('.')[-1] if '.' in filename else ''
-    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
-    return f"clearances/{instance.user.id}/{filename}"
+    return private_upload_path("clearances", instance.user.id, filename)
 
 
 class StudentClearance(models.Model):
