@@ -179,3 +179,50 @@ class StudentClearance(models.Model):
 
     def __str__(self):
         return f"Clearance for {self.user.username} - {self.status}"
+
+
+class PaymentStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    VERIFIED = 'VERIFIED', 'Verified'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
+def receipt_upload_path(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+    return f"payments/{instance.request.id}/{filename}"
+
+
+class Payment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(
+        CredentialRequest,
+        on_delete=models.CASCADE,
+        related_name='payments'
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    receipt_reference_number = models.CharField(max_length=100, blank=True)
+    receipt_image = models.FileField(
+        upload_to=receipt_upload_path,
+        storage=private_storage,
+        validators=[validate_file_size, validate_file_extension, validate_mime_type]
+    )
+    status = models.CharField(
+        max_length=50,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PENDING
+    )
+    remarks = models.TextField(blank=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_payments'
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Payment {self.id} for {self.request.tracking_number}"

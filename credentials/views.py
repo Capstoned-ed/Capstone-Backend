@@ -8,7 +8,8 @@ from .models import (
     CredentialType,
     CredentialRequest,
     RequirementDocument,
-    StudentClearance
+    StudentClearance,
+    Payment
 )
 from .serializers import (
     CredentialTypeSerializer,
@@ -17,7 +18,8 @@ from .serializers import (
     RequirementDocumentSerializer,
     StudentClearanceSerializer,
     StudentClearanceSubmitSerializer,
-    StudentClearanceReviewSerializer
+    StudentClearanceReviewSerializer,
+    PaymentSerializer
 )
 from .permissions import (
     IsAdminOrRegistrarOrReadOnly,
@@ -29,7 +31,8 @@ from .services import (
     CredentialTypeService,
     CredentialRequestService,
     RequirementDocumentService,
-    StudentClearanceService
+    StudentClearanceService,
+    PaymentService
 )
 from accounts.models import Role
 
@@ -107,6 +110,8 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = CredentialRequest.objects.select_related(
             'user', 'credential_type'
+        ).prefetch_related(
+            'payments'
         ).order_by('-created_at')
 
         status_param = self.request.query_params.get('status')
@@ -303,6 +308,96 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
         if self.action != 'review':
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing OTC payments.
+    """
+    serializer_class = PaymentSerializer
+
+    def get_queryset(self):
+        qs = Payment.objects.select_related(
+            'request__user'
+        ).order_by('-uploaded_at')
+        user = self.request.user
+
+        if user.is_authenticated and user.role == Role.STUDENT:
+            return qs.filter(request__user=user)
+
+        return qs
+
+    @extend_schema(responses={201: PaymentSerializer})
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        req = serializer.validated_data['request']
+        if request.user.role == Role.STUDENT and req.user != request.user:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        payment = PaymentService.submit_payment(
+            actor=request.user,
+            request=req,
+            amount=serializer.validated_data['amount'],
+            receipt_image=serializer.validated_data['receipt_image'],
+            receipt_reference_number=serializer.validated_data.get(
+                'receipt_reference_number', '')
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            PaymentSerializer(payment).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        payment = self.get_object()
+        if request.user.role == Role.STUDENT and payment.request.user != request.user:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        filename = payment.receipt_image.name.split('/')[-1]
+        return FileResponse(
+            payment.receipt_image.open('rb'),
+            as_attachment=True,
+            filename=filename
+        )
+
+    @extend_schema(responses={200: PaymentSerializer})
+    @action(detail=True, methods=['patch'])
+    def verify(self, request, pk=None):
+        payment = self.get_object()
+
+        if request.user.role == Role.STUDENT:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        action_type = request.data.get('action')
+        remarks = request.data.get('remarks', '')
+
+        if not action_type:
+            return Response(
+                {"detail": "action is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated_payment = PaymentService.verify_payment(
+            actor=request.user,
+            payment=payment,
+            action=action_type,
+            remarks=remarks
+        )
+
+        return Response(PaymentSerializer(updated_payment).data)
+
+    def update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def destroy(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

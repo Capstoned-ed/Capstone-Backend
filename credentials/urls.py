@@ -4,7 +4,8 @@ from .views import (
     CredentialTypeViewSet,
     CredentialRequestViewSet,
     RequirementDocumentViewSet,
-    StudentClearanceViewSet
+    StudentClearanceViewSet,
+    PaymentViewSet
 )
 
 router = DefaultRouter()
@@ -16,6 +17,7 @@ router.register(
 router.register(
     r'clearances', StudentClearanceViewSet, basename='studentclearance'
 )
+router.register(r'payments', PaymentViewSet, basename='payment')
 
 urlpatterns = [
     path('', include(router.urls)),

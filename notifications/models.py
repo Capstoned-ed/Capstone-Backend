@@ -13,6 +13,9 @@ class NotificationEvent(models.TextChoices):
     CLEARANCE_SUBMITTED = 'CLEARANCE_SUBMITTED', 'Clearance Submitted'
     CLEARANCE_APPROVED = 'CLEARANCE_APPROVED', 'Clearance Approved'
     CLEARANCE_REJECTED = 'CLEARANCE_REJECTED', 'Clearance Rejected'
+    PAYMENT_SUBMITTED = 'PAYMENT_SUBMITTED', 'Payment Submitted'
+    PAYMENT_VERIFIED = 'PAYMENT_VERIFIED', 'Payment Verified'
+    PAYMENT_REJECTED = 'PAYMENT_REJECTED', 'Payment Rejected'
 
 
 class Notification(models.Model):

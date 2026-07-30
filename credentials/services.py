@@ -8,7 +8,9 @@ from .models import (
     RequirementDocument,
     StudentClearance,
     ClearanceStatus,
-    RequestStatus
+    RequestStatus,
+    Payment,
+    PaymentStatus
 )
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
@@ -355,3 +357,107 @@ class StudentClearanceService:
         )
 
         return clearance
+
+
+class PaymentService:
+    @staticmethod
+    @transaction.atomic
+    def submit_payment(
+        actor, request, amount, receipt_image, receipt_reference_number=""
+    ):
+        if request.status != RequestStatus.PAYMENT_PENDING:
+            raise ValidationError(
+                "You can only submit an OTC payment when the request is "
+                "awaiting payment."
+            )
+
+        payment = Payment.objects.create(
+            request=request,
+            amount=amount,
+            receipt_reference_number=receipt_reference_number,
+            receipt_image=receipt_image,
+            status=PaymentStatus.PENDING
+        )
+
+        AuditService.log_action(
+            actor=actor,
+            action='PAYMENT_SUBMITTED',
+            object_type='Payment',
+            object_id=payment.id,
+            previous_state=None,
+            new_state={
+                'request_id': str(request.id),
+                'amount': str(amount),
+                'status': payment.status
+            }
+        )
+        return payment
+
+    @staticmethod
+    @transaction.atomic
+    def verify_payment(actor, payment, action, remarks=""):
+        if action not in ['VERIFY', 'REJECT']:
+            raise ValidationError("Action must be VERIFY or REJECT.")
+
+        if action == 'REJECT' and not remarks:
+            raise ValidationError("Remarks are required when rejecting an OTC payment.")
+
+        previous_state = {
+            'status': payment.status,
+            'remarks': payment.remarks,
+            'verified_by': payment.verified_by.id if payment.verified_by else None
+        }
+
+        payment.status = (
+            PaymentStatus.VERIFIED if action == 'VERIFY' else PaymentStatus.REJECTED
+        )
+        if remarks:
+            payment.remarks = remarks
+        payment.verified_by = actor
+        payment.verified_at = timezone.now()
+        payment.save()
+
+        AuditService.log_action(
+            actor=actor,
+            action=f'PAYMENT_VERIFICATION_{action}',
+            object_type='Payment',
+            object_id=payment.id,
+            previous_state=previous_state,
+            new_state={
+                'status': payment.status,
+                'remarks': payment.remarks,
+                'verified_by': str(actor.id)
+            }
+        )
+
+        if action == 'VERIFY':
+            CredentialRequestService.transition_request(
+                actor=actor,
+                credential_request=payment.request,
+                new_status=RequestStatus.PAYMENT_VERIFIED,
+                remarks="Automated transition from verified OTC payment."
+            )
+            NotificationService.create_notification(
+                recipient=payment.request.user,
+                event_type=NotificationEvent.PAYMENT_VERIFIED,
+                message=(
+                    f"Your OTC payment for request "
+                    f"{payment.request.tracking_number} was verified."
+                ),
+                related_object_type='Payment',
+                related_object_id=str(payment.id)
+            )
+        else:
+            NotificationService.create_notification(
+                recipient=payment.request.user,
+                event_type=NotificationEvent.PAYMENT_REJECTED,
+                message=(
+                    f"Your OTC payment for request "
+                    f"{payment.request.tracking_number} was rejected. "
+                    "Please resubmit."
+                ),
+                related_object_type='Payment',
+                related_object_id=str(payment.id)
+            )
+
+        return payment

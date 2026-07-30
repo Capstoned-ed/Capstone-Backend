@@ -337,3 +337,108 @@ class RequirementDocumentAPITests(APITestCase):
         # Verify it uses the private storage
         self.assertTrue(doc.file.path.startswith(str(private_storage.location)))
         self.assertTrue(os.path.exists(doc.file.path))
+
+
+class PaymentAPITests(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        super().setUpClass()
+        cls.temp_media_dir = tempfile.mkdtemp()
+        from credentials.storage import private_storage
+        cls.original_private_location = private_storage.location
+        private_storage.location = cls.temp_media_dir
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        from credentials.storage import private_storage
+        private_storage.location = cls.original_private_location
+        shutil.rmtree(cls.temp_media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.student1 = User.objects.create_user(
+            username='stud_p1', email='p1@test.com', password='p', role=Role.STUDENT
+        )
+        self.staff = User.objects.create_user(
+            username='staff_p', email='sp@test.com', password='p', role=Role.STAFF
+        )
+        self.ctype = CredentialType.objects.create(
+            code='DIPLOMA', name='Diploma', price=Decimal('500.00'), processing_days=5
+        )
+        self.req1 = CredentialRequest.objects.create(
+            user=self.student1, credential_type=self.ctype, status='PAYMENT_PENDING'
+        )
+        self.url_list = reverse('payment-list')
+
+    def test_submit_otc_payment(self):
+        self.client.force_authenticate(user=self.student1)
+        file_content = b"%PDF-1.4\n%content"
+        file = SimpleUploadedFile("receipt.pdf", file_content,
+                                  content_type="application/pdf")
+        data = {
+            'request': self.req1.id,
+            'amount': '500.00',
+            'receipt_reference_number': 'OTC-123',
+            'receipt_image': file
+        }
+        res = self.client.post(self.url_list, data, format='multipart')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data['status'], 'PENDING')
+
+    def test_verify_payment_success(self):
+        from .models import Payment
+        file = SimpleUploadedFile("receipt.pdf", b"content",
+                                  content_type="application/pdf")
+        payment = Payment.objects.create(
+            request=self.req1, amount=Decimal('500.00'),
+            receipt_image=file, status='PENDING'
+        )
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('payment-verify', kwargs={'pk': payment.id})
+        res = self.client.patch(url, {'action': 'VERIFY'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, 'VERIFIED')
+        self.assertEqual(payment.verified_by, self.staff)
+
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PAYMENT_VERIFIED')
+
+    def test_reject_payment_retry(self):
+        from .models import Payment
+        file = SimpleUploadedFile("receipt.pdf", b"content",
+                                  content_type="application/pdf")
+        payment = Payment.objects.create(
+            request=self.req1, amount=Decimal('500.00'),
+            receipt_image=file, status='PENDING'
+        )
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('payment-verify', kwargs={'pk': payment.id})
+        res = self.client.patch(
+            url, {'action': 'REJECT', 'remarks': 'Blurry receipt'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, 'REJECTED')
+
+        self.req1.refresh_from_db()
+        # Request should stay in PAYMENT_PENDING so student can retry
+        self.assertEqual(self.req1.status, 'PAYMENT_PENDING')
+
+        # Student submits another payment attempt
+        self.client.force_authenticate(user=self.student1)
+        file2 = SimpleUploadedFile(
+            "receipt2.pdf", b"%PDF-1.4\n%content", content_type="application/pdf")
+        data = {
+            'request': self.req1.id,
+            'amount': '500.00',
+            'receipt_image': file2
+        }
+        res2 = self.client.post(self.url_list, data, format='multipart')
+        if res2.status_code != 201:
+            print("ERROR DATA:", res2.data)
+        self.assertEqual(res2.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Payment.objects.filter(request=self.req1).count(), 2)
