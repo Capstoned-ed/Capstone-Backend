@@ -20,6 +20,7 @@ class Notification(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='notifications'
     )
+    # max_length=50 accommodates longest choice value (REQUEST_STATUS_CHANGED, 22 chars)
     event_type = models.CharField(max_length=50, choices=NotificationEvent.choices)
     message = models.TextField()
     related_object_type = models.CharField(max_length=100, null=True, blank=True)

@@ -135,11 +135,14 @@ class CredentialRequestService:
     @staticmethod
     @transaction.atomic
     def create_request(actor, validated_data):
-        has_clearance = StudentClearance.objects.filter(
-            user=actor, status=ClearanceStatus.APPROVED
-        ).exists()
+        clearance = (
+            StudentClearance.objects
+            .select_for_update()
+            .filter(user=actor, status=ClearanceStatus.APPROVED)
+            .first()
+        )
 
-        if not has_clearance:
+        if not clearance:
             raise ValidationError(
                 "You must have an APPROVED clearance to create a request."
             )
@@ -178,8 +181,10 @@ class CredentialRequestService:
     @staticmethod
     @transaction.atomic
     def transition_request(actor, credential_request, new_status, remarks=""):
-        credential_request = CredentialRequest.objects.select_for_update().get(
-            pk=credential_request.pk
+        credential_request = (
+            CredentialRequest.objects
+            .select_for_update()
+            .get(pk=credential_request.pk)
         )
         current_status = credential_request.status
         allowed_transitions = CredentialRequestService.TRANSITION_MATRIX.get(
@@ -194,7 +199,8 @@ class CredentialRequestService:
 
         if actor.role not in transition['roles']:
             raise PermissionDenied(
-                "You do not have permission to perform this transition.")
+                "You do not have permission to perform this transition."
+            )
 
         if new_status in [
             RequestStatus.REJECTED,
@@ -208,7 +214,7 @@ class CredentialRequestService:
         }
 
         credential_request.status = new_status
-        if remarks:
+        if remarks is not None:
             credential_request.remarks = remarks
         credential_request.save()
 
@@ -246,6 +252,13 @@ class RequirementDocumentService:
     @staticmethod
     @transaction.atomic
     def upload_document(actor, validated_data):
+        credential_request = validated_data['request']
+
+        if actor.role == Role.STUDENT and credential_request.user != actor:
+            raise PermissionDenied(
+                "You can only upload documents to your own credential requests."
+            )
+
         document = RequirementDocument.objects.create(**validated_data)
 
         AuditService.log_action(

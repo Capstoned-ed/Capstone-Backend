@@ -1,10 +1,8 @@
-from django.db import transaction
 from .models import Notification
 
 
 class NotificationService:
     @staticmethod
-    @transaction.atomic
     def create_notification(
         *,
         recipient,

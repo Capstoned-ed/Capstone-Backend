@@ -46,6 +46,10 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['object_type', 'object_id']),
+            models.Index(fields=['actor']),
+        ]
 
     def __str__(self):
         return (

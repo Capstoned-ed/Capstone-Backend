@@ -36,8 +36,10 @@ class CredentialRequestPermission(permissions.BasePermission):
         if request.method == 'POST':
             return request.user.role == Role.STUDENT
 
-        if request.method == 'PATCH' and view.action == 'transition':
-            return True
+        if request.method == 'PATCH':
+            return request.user.role in [
+                Role.STAFF, Role.REGISTRAR, Role.ADMIN, Role.STUDENT
+            ]
 
         if request.method not in permissions.SAFE_METHODS:
             return False
