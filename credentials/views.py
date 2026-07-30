@@ -183,7 +183,7 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = RequirementDocumentSerializer
     permission_classes = [RequirementDocumentPermission]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         qs = RequirementDocument.objects.select_related(
@@ -360,7 +360,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
         )
         headers = self.get_success_headers(serializer.data)
         return Response(
-            PaymentSerializer(payment).data,
+            PaymentSerializer(payment, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
             headers=headers
         )
@@ -368,8 +368,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         payment = self.get_object()
-        if request.user.role == Role.STUDENT and payment.request.user != request.user:
-            return Response(status=status.HTTP_403_FORBIDDEN)
 
         if not payment.receipt_image or not payment.receipt_image.storage.exists(
             payment.receipt_image.name

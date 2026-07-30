@@ -122,7 +122,7 @@ class RequirementDocumentSerializer(serializers.ModelSerializer):
         ret = super().to_representation(instance)
         request = self.context.get('request')
         file_obj = getattr(instance, 'file', None)
-        if request and file_obj:
+        if request and file_obj and file_obj.name:
             ret['file'] = request.build_absolute_uri(
                 reverse('requirementdocument-download', kwargs={'pk': instance.pk})
             )
@@ -208,7 +208,7 @@ class PaymentSerializer(serializers.ModelSerializer):
         ret = super().to_representation(instance)
         request = self.context.get('request')
         receipt_image = getattr(instance, 'receipt_image', None)
-        if request and receipt_image:
+        if request and receipt_image and receipt_image.name:
             ret['receipt_image'] = request.build_absolute_uri(
                 reverse('payment-download', kwargs={'pk': instance.pk})
             )
