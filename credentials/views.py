@@ -9,7 +9,8 @@ from .models import (
     CredentialType,
     CredentialRequest,
     RequirementDocument,
-    StudentClearance
+    StudentClearance,
+    Payment
 )
 from .serializers import (
     CredentialTypeSerializer,
@@ -18,19 +19,22 @@ from .serializers import (
     RequirementDocumentSerializer,
     StudentClearanceSerializer,
     StudentClearanceSubmitSerializer,
-    StudentClearanceReviewSerializer
+    StudentClearanceReviewSerializer,
+    PaymentSerializer
 )
 from .permissions import (
     IsAdminOrRegistrarOrReadOnly,
     CredentialRequestPermission,
     RequirementDocumentPermission,
-    StudentClearancePermission
+    StudentClearancePermission,
+    PaymentPermission
 )
 from .services import (
     CredentialTypeService,
     CredentialRequestService,
     RequirementDocumentService,
-    StudentClearanceService
+    StudentClearanceService,
+    PaymentService
 )
 from accounts.models import Role
 
@@ -39,6 +43,7 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing credential types.
     """
+    # Base queryset for router URL introspection; actual filtering in get_queryset().
     queryset = CredentialType.objects.all().order_by('name')
     permission_classes = [IsAdminOrRegistrarOrReadOnly]
 
@@ -109,6 +114,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         qs = CredentialRequest.objects.select_related(
             'user', 'credential_type'
         ).prefetch_related(
+            'payments',
             'documents'
         ).order_by('-created_at')
 
@@ -208,6 +214,13 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         document = self.get_object()
+
+        if not document.file or not document.file.storage.exists(document.file.name):
+            return Response(
+                {"detail": "Document file not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         filename = Path(document.file.name).name
         return FileResponse(
             document.file.open('rb'),
@@ -298,6 +311,102 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
             as_attachment=True,
             filename=filename
         )
+
+    def update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing OTC payments.
+    """
+    serializer_class = PaymentSerializer
+    permission_classes = [PaymentPermission]
+
+    def get_queryset(self):
+        qs = Payment.objects.select_related(
+            'request__user'
+        ).order_by('-uploaded_at')
+        user = self.request.user
+
+        if user.is_authenticated and user.role == Role.STUDENT:
+            return qs.filter(request__user=user)
+
+        return qs
+
+    @extend_schema(responses={201: PaymentSerializer})
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        req = serializer.validated_data['request']
+        if request.user.role == Role.STUDENT and req.user != request.user:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        payment = PaymentService.submit_payment(
+            actor=request.user,
+            request=req,
+            amount=serializer.validated_data['amount'],
+            receipt_image=serializer.validated_data['receipt_image'],
+            receipt_reference_number=serializer.validated_data.get(
+                'receipt_reference_number', '')
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            PaymentSerializer(payment).data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        payment = self.get_object()
+        if request.user.role == Role.STUDENT and payment.request.user != request.user:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        if not payment.receipt_image or not payment.receipt_image.storage.exists(
+            payment.receipt_image.name
+        ):
+            return Response(
+                {"detail": "Receipt file not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        filename = Path(payment.receipt_image.name).name
+        return FileResponse(
+            payment.receipt_image.open('rb'),
+            as_attachment=True,
+            filename=filename
+        )
+
+    @extend_schema(responses={200: PaymentSerializer})
+    @action(detail=True, methods=['patch'])
+    def verify(self, request, pk=None):
+        payment = self.get_object()
+
+        action_type = request.data.get('action')
+        remarks = request.data.get('remarks', '')
+
+        if not action_type:
+            return Response(
+                {"detail": "action is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated_payment = PaymentService.verify_payment(
+            actor=request.user,
+            payment=payment,
+            action=action_type,
+            remarks=remarks
+        )
+
+        return Response(PaymentSerializer(updated_payment).data)
 
     def update(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
