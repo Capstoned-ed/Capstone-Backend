@@ -226,5 +226,11 @@ class Payment(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['request', 'status']),
+            models.Index(fields=['status']),
+        ]
+
     def __str__(self):
         return f"Payment {self.id} for {self.request.tracking_number}"
