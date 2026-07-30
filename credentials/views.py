@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from pathlib import Path
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
@@ -183,7 +183,7 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = RequirementDocumentSerializer
     permission_classes = [RequirementDocumentPermission]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         qs = RequirementDocument.objects.select_related(
@@ -328,6 +328,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = PaymentSerializer
     permission_classes = [PaymentPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         qs = Payment.objects.select_related(

@@ -160,6 +160,70 @@ class CredentialRequestAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('remarks', response.data[0].lower())
 
+    def test_registrar_can_transition_payment_verified_to_processing(self):
+        """Registrar can transition request from PAYMENT_VERIFIED to PROCESSING."""
+        self.req1.status = 'PAYMENT_VERIFIED'
+        self.req1.save()
+        self.client.force_authenticate(user=self.registrar)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'PROCESSING'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PROCESSING')
+
+    def test_registrar_can_transition_processing_to_ready_for_release(self):
+        """Registrar can transition request from PROCESSING to READY_FOR_RELEASE."""
+        self.req1.status = 'PROCESSING'
+        self.req1.save()
+        self.client.force_authenticate(user=self.registrar)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'READY_FOR_RELEASE'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'READY_FOR_RELEASE')
+
+    def test_registrar_can_reject_processing_request_with_remarks(self):
+        """Registrar can reject a PROCESSING request when remarks are provided."""
+        self.req1.status = 'PROCESSING'
+        self.req1.save()
+        self.client.force_authenticate(user=self.registrar)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'REJECTED', 'remarks': 'Incomplete records'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'REJECTED')
+        self.assertEqual(self.req1.remarks, 'Incomplete records')
+
+    def test_registrar_reject_without_remarks_fails(self):
+        """Registrar rejecting a PROCESSING request without remarks fails."""
+        self.req1.status = 'PROCESSING'
+        self.req1.save()
+        self.client.force_authenticate(user=self.registrar)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'REJECTED'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PROCESSING')
+
+    def test_student_cannot_perform_registrar_transitions(self):
+        """Student cannot transition request to PROCESSING or READY_FOR_RELEASE."""
+        self.req1.status = 'PAYMENT_VERIFIED'
+        self.req1.save()
+        self.client.force_authenticate(user=self.student1)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url, {'status': 'PROCESSING'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
 
 class RequirementDocumentAPITests(APITestCase):
     @classmethod
