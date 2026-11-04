@@ -25,9 +25,25 @@ router.register(r'payments', PaymentViewSet, basename='payment')
 
 urlpatterns = [
     # ML Prediction & Forecasting Endpoints
-    path('credentials/predict-turnaround/', PredictTurnaroundView.as_view(), name='predict-turnaround'),
-    path('credentials/forecast/daily/', AdminDailyForecastView.as_view(), name='admin-daily-forecast'),
-    path('credentials/forecast/monthly-workload/', AdminMonthlyWorkloadView.as_view(), name='admin-monthly-workload'),
-    path('credentials/ml-health/', MLHealthStatusView.as_view(), name='ml-health-status'),
+    path(
+        'credentials/predict-turnaround/',
+        PredictTurnaroundView.as_view(),
+        name='predict-turnaround'
+    ),
+    path(
+        'credentials/forecast/daily/',
+        AdminDailyForecastView.as_view(),
+        name='admin-daily-forecast'
+    ),
+    path(
+        'credentials/forecast/monthly-workload/',
+        AdminMonthlyWorkloadView.as_view(),
+        name='admin-monthly-workload'
+    ),
+    path(
+        'credentials/ml-health/',
+        MLHealthStatusView.as_view(),
+        name='ml-health-status'
+    ),
     path('', include(router.urls)),
 ]

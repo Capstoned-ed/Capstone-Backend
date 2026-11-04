@@ -428,7 +428,10 @@ class PredictTurnaroundView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        cred_code = request.query_params.get('credential_type') or request.query_params.get('code', 'TOR')
+        cred_code = (
+            request.query_params.get('credential_type')
+            or request.query_params.get('code', 'TOR')
+        )
         purpose = request.query_params.get('purpose', 'Employment')
         date_requested = request.query_params.get('date_requested')
         num_docs = int(request.query_params.get('num_documents', 1))
@@ -466,7 +469,12 @@ class AdminDailyForecastView(APIView):
     def get(self, request):
         if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
             return Response(
-                {"detail": "Only staff and administrators can access daily demand forecasting."},
+                {
+                    "detail": (
+                        "Only staff and administrators can access daily "
+                        "demand forecasting."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -474,15 +482,22 @@ class AdminDailyForecastView(APIView):
         if not start_date:
             from datetime import datetime, timedelta
             start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-            
+
         op_days = int(request.query_params.get('operating_days', 20))
-        res = MLClient.forecast_daily_demand(start_date=start_date, operating_days=op_days)
+        res = MLClient.forecast_daily_demand(
+            start_date=start_date, operating_days=op_days
+        )
         return Response(res, status=status.HTTP_200_OK)
 
     def post(self, request):
         if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
             return Response(
-                {"detail": "Only staff and administrators can access daily demand forecasting."},
+                {
+                    "detail": (
+                        "Only staff and administrators can access daily "
+                        "demand forecasting."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -490,9 +505,11 @@ class AdminDailyForecastView(APIView):
         if not start_date:
             from datetime import datetime, timedelta
             start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-            
+
         op_days = int(request.data.get('operating_days', 20))
-        res = MLClient.forecast_daily_demand(start_date=start_date, operating_days=op_days)
+        res = MLClient.forecast_daily_demand(
+            start_date=start_date, operating_days=op_days
+        )
         return Response(res, status=status.HTTP_200_OK)
 
 
@@ -506,7 +523,12 @@ class AdminMonthlyWorkloadView(APIView):
     def get(self, request):
         if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
             return Response(
-                {"detail": "Only staff and administrators can access monthly workload forecasting."},
+                {
+                    "detail": (
+                        "Only staff and administrators can access monthly "
+                        "workload forecasting."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -517,7 +539,12 @@ class AdminMonthlyWorkloadView(APIView):
     def post(self, request):
         if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
             return Response(
-                {"detail": "Only staff and administrators can access monthly workload forecasting."},
+                {
+                    "detail": (
+                        "Only staff and administrators can access monthly "
+                        "workload forecasting."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 

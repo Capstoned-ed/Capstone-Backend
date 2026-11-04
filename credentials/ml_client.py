@@ -1,7 +1,9 @@
 """
 RegQuest ML Microservice Client Service Layer.
-Manages secure, fault-tolerant HTTP communication between Django backend and FastAPI ML microservice.
-Guarantees graceful degradation: if ML microservice is unavailable, fallback business logic engages.
+Manages secure, fault-tolerant HTTP communication between Django backend and
+FastAPI ML microservice.
+Guarantees graceful degradation: if ML microservice is unavailable, fallback
+business logic engages.
 """
 
 import json
@@ -33,14 +35,20 @@ class MLClient:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status == 200:
                     return json.loads(response.read().decode('utf-8'))
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, Exception) as e:
+        except (
+            urllib.error.URLError, urllib.error.HTTPError, TimeoutError, Exception
+        ) as e:
             logger.warning(f"ML Service call to {endpoint} failed: {e}")
             return None
 
     @staticmethod
     def _get(endpoint: str, timeout: float = 2.0) -> dict:
         url = f"{ML_BASE_URL}{endpoint}"
-        req = urllib.request.Request(url, headers={'Content-Type': 'application/json'}, method='GET')
+        req = urllib.request.Request(
+            url,
+            headers={'Content-Type': 'application/json'},
+            method='GET'
+        )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status == 200:
@@ -56,7 +64,10 @@ class MLClient:
             return res
         return {
             "status": "unavailable",
-            "model_availability": {"daily_forecaster": False, "processing_baseline": False},
+            "model_availability": {
+                "daily_forecaster": False,
+                "processing_baseline": False
+            },
             "detail": "ML microservice is currently unreachable."
         }
 
@@ -70,7 +81,8 @@ class MLClient:
     ) -> dict:
         """
         Estimates processing turnaround time in operating days.
-        Falls back to CredentialType database master data if ML microservice is unreachable.
+        Falls back to CredentialType database master data if ML microservice
+        is unreachable.
         """
         payload = {
             "credential_type": credential_code,
@@ -138,4 +150,3 @@ class MLClient:
             "status": "unavailable",
             "detail": "Monthly workload forecasting service is currently unavailable."
         }
-

@@ -82,7 +82,9 @@ class MLIntegrationTests(APITestCase):
         resp = self.client.get(self.daily_forecast_url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-        resp_post = self.client.post(self.daily_forecast_url, {"start_date": "2026-11-09"})
+        resp_post = self.client.post(
+            self.daily_forecast_url, {"start_date": "2026-11-09"}
+        )
         self.assertEqual(resp_post.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_student_forbidden_from_monthly_workload(self):
@@ -95,10 +97,14 @@ class MLIntegrationTests(APITestCase):
         mock_forecast = {
             "status": "success",
             "forecast": [{"date": "2026-11-09", "predicted_requests": 35}],
-            "model_version": "daily-forecaster-ridge-v1"
+            "model_version": "daily-forecaster-random_forest-v1"
         }
-        with patch.object(MLClient, 'forecast_daily_demand', return_value=mock_forecast):
-            resp = self.client.get(self.daily_forecast_url, {'start_date': '2026-11-09'})
+        with patch.object(
+            MLClient, 'forecast_daily_demand', return_value=mock_forecast
+        ):
+            resp = self.client.get(
+                self.daily_forecast_url, {'start_date': '2026-11-09'}
+            )
             self.assertEqual(resp.status_code, status.HTTP_200_OK)
             self.assertEqual(resp.json()["status"], "success")
 
@@ -110,8 +116,12 @@ class MLIntegrationTests(APITestCase):
             "predicted_total_requests": 400,
             "workload_level": "Light"
         }
-        with patch.object(MLClient, 'forecast_monthly_workload', return_value=mock_workload):
-            resp = self.client.get(self.monthly_workload_url, {'target_month': '2026-12'})
+        with patch.object(
+            MLClient, 'forecast_monthly_workload', return_value=mock_workload
+        ):
+            resp = self.client.get(
+                self.monthly_workload_url, {'target_month': '2026-12'}
+            )
             self.assertEqual(resp.status_code, status.HTTP_200_OK)
             self.assertEqual(resp.json()["workload_level"], "Light")
 
@@ -119,10 +129,12 @@ class MLIntegrationTests(APITestCase):
         self.client.force_authenticate(user=self.staff)
         mock_health = {
             "status": "ok",
-            "model_availability": {"daily_forecaster": True, "processing_baseline": True}
+            "model_availability": {
+                "daily_forecaster": True,
+                "processing_baseline": True
+            }
         }
         with patch.object(MLClient, 'get_health', return_value=mock_health):
             resp = self.client.get(self.health_url)
             self.assertEqual(resp.status_code, status.HTTP_200_OK)
             self.assertEqual(resp.json()["status"], "ok")
-

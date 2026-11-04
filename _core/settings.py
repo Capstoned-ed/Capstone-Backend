@@ -172,4 +172,3 @@ AUTH_USER_MODEL = 'accounts.User'
 
 # ML Microservice Configuration
 ML_SERVICE_URL = env('ML_SERVICE_URL', default='http://localhost:8001')
-
