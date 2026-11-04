@@ -1,4 +1,6 @@
 from rest_framework import viewsets, status
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -37,6 +39,7 @@ from .services import (
     PaymentService
 )
 from accounts.models import Role
+from .ml_client import MLClient
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
@@ -415,3 +418,119 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class PredictTurnaroundView(APIView):
+    """
+    Predict estimated credential processing duration.
+    Accessible to all authenticated users (Students, Staff, Registrars, Admins).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        cred_code = request.query_params.get('credential_type') or request.query_params.get('code', 'TOR')
+        purpose = request.query_params.get('purpose', 'Employment')
+        date_requested = request.query_params.get('date_requested')
+        num_docs = int(request.query_params.get('num_documents', 1))
+
+        res = MLClient.predict_processing_time(
+            credential_code=cred_code,
+            purpose=purpose,
+            date_requested=date_requested,
+            num_documents=num_docs
+        )
+        return Response(res, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        cred_code = request.data.get('credential_type', 'TOR')
+        purpose = request.data.get('purpose', 'Employment')
+        date_requested = request.data.get('date_requested')
+        num_docs = int(request.data.get('num_documents', 1))
+
+        res = MLClient.predict_processing_time(
+            credential_code=cred_code,
+            purpose=purpose,
+            date_requested=date_requested,
+            num_documents=num_docs
+        )
+        return Response(res, status=status.HTTP_200_OK)
+
+
+class AdminDailyForecastView(APIView):
+    """
+    Daily incoming credential request forecasting.
+    Restricted to Staff, Registrars, and Administrators.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {"detail": "Only staff and administrators can access daily demand forecasting."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        start_date = request.query_params.get('start_date')
+        if not start_date:
+            from datetime import datetime, timedelta
+            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            
+        op_days = int(request.query_params.get('operating_days', 20))
+        res = MLClient.forecast_daily_demand(start_date=start_date, operating_days=op_days)
+        return Response(res, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {"detail": "Only staff and administrators can access daily demand forecasting."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        start_date = request.data.get('start_date')
+        if not start_date:
+            from datetime import datetime, timedelta
+            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            
+        op_days = int(request.data.get('operating_days', 20))
+        res = MLClient.forecast_daily_demand(start_date=start_date, operating_days=op_days)
+        return Response(res, status=status.HTTP_200_OK)
+
+
+class AdminMonthlyWorkloadView(APIView):
+    """
+    Monthly workload volume forecasting and classification.
+    Restricted to Staff, Registrars, and Administrators.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {"detail": "Only staff and administrators can access monthly workload forecasting."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        target_month = request.query_params.get('target_month')
+        res = MLClient.forecast_monthly_workload(target_month=target_month)
+        return Response(res, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {"detail": "Only staff and administrators can access monthly workload forecasting."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        target_month = request.data.get('target_month')
+        res = MLClient.forecast_monthly_workload(target_month=target_month)
+        return Response(res, status=status.HTTP_200_OK)
+
+
+class MLHealthStatusView(APIView):
+    """
+    Health and status check for ML microservice integration.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(MLClient.get_health(), status=status.HTTP_200_OK)
