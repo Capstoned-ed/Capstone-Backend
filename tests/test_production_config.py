@@ -1,12 +1,21 @@
 from django.test import TestCase, override_settings
 from django.conf import settings
+from django.core.cache import cache
+from rest_framework import status
 from rest_framework.test import APIClient
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+from unittest.mock import patch
+from accounts.models import User, Role
 
 
 class ProductionConfigAndCORSTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.stable_endpoint = '/api/token/'
+
+    def tearDown(self):
+        cache.clear()
 
     def test_cors_allowed_origin_returns_access_control_headers(self):
         response = self.client.options(
@@ -130,3 +139,51 @@ class ProductionConfigAndCORSTests(TestCase):
             HTTP_X_FORWARDED_PROTO='https'
         )
         self.assertTrue(response.wsgi_request.is_secure())
+
+    def test_throttling_classes_and_rates_configured(self):
+        drf_settings = settings.REST_FRAMEWORK
+        self.assertIn('DEFAULT_THROTTLE_CLASSES', drf_settings)
+        throttle_classes = drf_settings['DEFAULT_THROTTLE_CLASSES']
+        self.assertIn(
+            'rest_framework.throttling.AnonRateThrottle',
+            throttle_classes
+        )
+        self.assertIn(
+            'rest_framework.throttling.UserRateThrottle',
+            throttle_classes
+        )
+        self.assertIn('DEFAULT_THROTTLE_RATES', drf_settings)
+        rates = drf_settings['DEFAULT_THROTTLE_RATES']
+        self.assertIn('anon', rates)
+        self.assertIn('user', rates)
+
+    def test_anonymous_rate_throttling_enforced(self):
+        with patch.dict(AnonRateThrottle.THROTTLE_RATES, {'anon': '2/min'}):
+            res1 = self.client.post('/api/auth/login/', {})
+            self.assertEqual(res1.status_code, status.HTTP_400_BAD_REQUEST)
+            res2 = self.client.post('/api/auth/login/', {})
+            self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
+            res3 = self.client.post('/api/auth/login/', {})
+            self.assertEqual(
+                res3.status_code,
+                status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
+    def test_authenticated_user_rate_throttling_enforced(self):
+        user = User.objects.create_user(
+            username='throttletest',
+            email='throttletest@example.com',
+            password='Password123!',
+            role=Role.STUDENT
+        )
+        self.client.force_authenticate(user=user)
+        with patch.dict(UserRateThrottle.THROTTLE_RATES, {'user': '2/min'}):
+            res1 = self.client.get('/api/credential-types/')
+            self.assertEqual(res1.status_code, status.HTTP_200_OK)
+            res2 = self.client.get('/api/credential-types/')
+            self.assertEqual(res2.status_code, status.HTTP_200_OK)
+            res3 = self.client.get('/api/credential-types/')
+            self.assertEqual(
+                res3.status_code,
+                status.HTTP_429_TOO_MANY_REQUESTS
+            )
