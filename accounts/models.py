@@ -39,6 +39,21 @@ class User(AbstractUser):
             'upon next login.'
         ),
     )
+    course_name = models.CharField(
+        max_length=150,
+        blank=True,
+        default='Bachelor of Science in Information Technology',
+        help_text=_(
+            'Full name of enrolled program '
+            '(e.g., Bachelor of Science in Information Technology).'
+        ),
+    )
+    course_code = models.CharField(
+        max_length=20,
+        blank=True,
+        default='IT',
+        help_text=_('Acronym or short code of enrolled program (e.g., IT).'),
+    )
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"

@@ -27,6 +27,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'role',
+            'course_name', 'course_code',
             'is_active', 'force_password_change',
             'date_joined', 'last_login'
         ]
@@ -41,9 +42,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'role']
+        fields = [
+            'username', 'email', 'password', 'role',
+            'course_name', 'course_code'
+        ]
         extra_kwargs = {
-            'password': {'write_only': True}
+            'password': {'write_only': True},
+            'course_name': {'required': False},
+            'course_code': {'required': False}
         }
 
 
@@ -53,4 +59,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['email', 'role', 'is_active']
+        fields = ['email', 'role', 'course_name', 'course_code', 'is_active']
+        extra_kwargs = {
+            'course_name': {'required': False},
+            'course_code': {'required': False}
+        }
