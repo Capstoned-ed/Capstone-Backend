@@ -31,6 +31,7 @@ class CredentialTypeService:
             previous_state=None,
             new_state={
                 'code': credential_type.code,
+                'doc_code': credential_type.doc_code,
                 'name': credential_type.name,
                 'price': str(credential_type.price),
                 'processing_days': credential_type.processing_days,
@@ -44,6 +45,7 @@ class CredentialTypeService:
     def update_type(actor, credential_type, validated_data):
         previous_state = {
             'code': credential_type.code,
+            'doc_code': credential_type.doc_code,
             'name': credential_type.name,
             'description': credential_type.description,
             'price': str(credential_type.price),
@@ -58,6 +60,7 @@ class CredentialTypeService:
 
         new_state = {
             'code': credential_type.code,
+            'doc_code': credential_type.doc_code,
             'name': credential_type.name,
             'description': credential_type.description,
             'price': str(credential_type.price),
@@ -160,6 +163,7 @@ class CredentialRequestService:
             previous_state=None,
             new_state={
                 'tracking_number': credential_request.tracking_number,
+                'course': credential_request.course,
                 'status': credential_request.status,
                 'credential_type': credential_request.credential_type.code,
                 'remarks': credential_request.remarks

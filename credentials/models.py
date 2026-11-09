@@ -1,10 +1,32 @@
 import uuid
-import re
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 from .validators import validate_file_size, validate_file_extension, validate_mime_type
 from .storage import private_storage
+
+
+DEFAULT_DOC_CODES = {
+    'TOR': '1',
+    'HONORABLE DISMISSAL': '2',
+    'HONORABLE_DISMISSAL': '2',
+    'HD': '2',
+    'EVALUATION': '5',
+    'CERTIFICATION': '4',
+    'CAR': '4F',
+    'CERT_CAR': '4F',
+    'GPA': '4B',
+    'CERT_GPA': '4B',
+    'OFFICIALLY ENROLLED': '4A',
+    'OFFICIALLY_ENROLLED': '4A',
+    'CERT_ENROLLED': '4A',
+    'EARNED UNITS': '4D',
+    'EARNED_UNITS': '4D',
+    'CERT_UNITS': '4D',
+    'SUB WITH GRADES': '4G',
+    'SUB_WITH_GRADES': '4G',
+    'CERT_GRADES': '4G',
+}
 
 
 class CredentialType(models.Model):
@@ -16,6 +38,12 @@ class CredentialType(models.Model):
         max_length=10,
         unique=True,
         help_text="Unique short code (e.g., TOR, COE)."
+    )
+    doc_code = models.CharField(
+        max_length=10,
+        blank=True,
+        default='',
+        help_text="Document code used for tracking number (e.g. 1, 2, 4A, 4F, 5)."
     )
     name = models.CharField(
         max_length=100,
@@ -39,6 +67,17 @@ class CredentialType(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if not self.doc_code:
+            code_upper = self.code.upper() if self.code else ''
+            name_upper = self.name.upper() if self.name else ''
+            self.doc_code = (
+                DEFAULT_DOC_CODES.get(code_upper) or
+                DEFAULT_DOC_CODES.get(name_upper) or
+                self.code
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -74,7 +113,12 @@ class CredentialRequest(models.Model):
         choices=RequestStatus.choices,
         default=RequestStatus.PENDING
     )
-    tracking_number = models.CharField(max_length=20, unique=True, editable=False)
+    course = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Course acronym captured at the time of request."
+    )
+    tracking_number = models.CharField(max_length=50, unique=True, editable=False)
     remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -87,20 +131,38 @@ class CredentialRequest(models.Model):
         ]
 
     def save(self, *args, **kwargs):
+        if not self.course:
+            self.course = getattr(self.user, 'course_code', None) or 'IT'
+
         if not self.tracking_number:
-            year = timezone.now().year
+            date_str = timezone.now().strftime('%y-%m-%d')
+            username = str(self.user.username) if self.user else 'STUDENT'
+            student_id = username[2:] if len(username) > 2 else username
+
+            if hasattr(self, '_custom_doc_code') and self._custom_doc_code:
+                doc_num = str(self._custom_doc_code)
+            elif self.credential_type:
+                doc_num = (
+                    self.credential_type.doc_code or
+                    DEFAULT_DOC_CODES.get(self.credential_type.code.upper()) or
+                    DEFAULT_DOC_CODES.get(self.credential_type.name.upper()) or
+                    self.credential_type.code
+                )
+            else:
+                doc_num = '1'
 
             with transaction.atomic():
-                qs = CredentialRequest.objects.select_for_update().filter(
-                    tracking_number__startswith=f'REQ-{year}-'
+                user_requests_count = (
+                    CredentialRequest.objects.select_for_update()
+                    .filter(user=self.user)
+                    .exclude(pk=self.pk)
+                    .count()
                 )
-                max_seq = 0
-                for obj in qs.only('tracking_number'):
-                    match = re.search(r'-(\d+)$', obj.tracking_number)
-                    if match:
-                        max_seq = max(max_seq, int(match.group(1)))
-
-                self.tracking_number = f'REQ-{year}-{max_seq + 1:06d}'
+                user_seq = user_requests_count + 1
+                seq_str = f"{user_seq:03d}"
+                self.tracking_number = (
+                    f"{self.course}-{date_str}-{student_id}-{doc_num}-{seq_str}"
+                )
 
         super().save(*args, **kwargs)
 

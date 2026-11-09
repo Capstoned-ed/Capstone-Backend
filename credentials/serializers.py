@@ -18,7 +18,7 @@ class CredentialTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CredentialType
         fields = [
-            'id', 'code', 'name', 'description',
+            'id', 'code', 'doc_code', 'name', 'description',
             'price', 'processing_days', 'is_active',
             'created_at', 'updated_at'
         ]
@@ -32,9 +32,12 @@ class CredentialTypeCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CredentialType
         fields = [
-            'code', 'name', 'description',
+            'code', 'doc_code', 'name', 'description',
             'price', 'processing_days', 'is_active'
         ]
+        extra_kwargs = {
+            'doc_code': {'required': False}
+        }
 
 
 class NestedPaymentSerializer(serializers.ModelSerializer):
@@ -92,7 +95,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = CredentialRequest
         fields = [
-            'id', 'user', 'credential_type', 'status',
+            'id', 'user', 'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
             'documents', 'payments'
         ]

@@ -10,17 +10,27 @@ User = get_user_model()
 class AccountService:
     @staticmethod
     @transaction.atomic
-    def create_user(actor, username, email, password, role):
+    def create_user(
+        actor, username, email, password, role,
+        course_name=None, course_code=None, **extra_fields
+    ):
         """
         Creates a new user, forces password change, and logs the action.
         """
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            role=role,
-            force_password_change=True
-        )
+        user_kwargs = {
+            'username': username,
+            'email': email,
+            'password': password,
+            'role': role,
+            'force_password_change': True,
+            **extra_fields
+        }
+        if course_name is not None:
+            user_kwargs['course_name'] = course_name
+        if course_code is not None:
+            user_kwargs['course_code'] = course_code
+
+        user = User.objects.create_user(**user_kwargs)
 
         # Log the action
         AuditService.log_action(
@@ -33,6 +43,8 @@ class AccountService:
                 'username': user.username,
                 'email': user.email,
                 'role': user.role,
+                'course_name': user.course_name,
+                'course_code': user.course_code,
                 'is_active': user.is_active,
                 'force_password_change': user.force_password_change
             }
