@@ -2,6 +2,34 @@ import sys
 from django.db import migrations
 
 
+def sync_postgres_sequence(schema_editor, table_name, pk_field='id'):
+    """
+    Synchronize the PostgreSQL auto-increment sequence with MAX(pk_field).
+    Safely no-ops on SQLite, MySQL, and other database engines.
+    """
+    connection = schema_editor.connection
+    if connection.vendor != 'postgresql':
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_get_serial_sequence(%s, %s);", [table_name, pk_field]
+        )
+        result = cursor.fetchone()
+        seq_name = result[0] if result else None
+
+        if seq_name:
+            cursor.execute(
+                f"""
+                SELECT setval(
+                    '{seq_name}',
+                    COALESCE((SELECT MAX({pk_field}) FROM {table_name}), 1),
+                    (SELECT COUNT(*) > 0 FROM {table_name})
+                );
+                """
+            )
+
+
 def seed_credential_types(apps, schema_editor):
     if 'pytest' in sys.modules or any('test' in arg for arg in sys.argv):
         return
@@ -34,7 +62,9 @@ def seed_credential_types(apps, schema_editor):
             'code': 'EVAL',
             'doc_code': '5',
             'name': 'Evaluation',
-            'description': 'Curriculum evaluation of academic credits and standing.',
+            'description': (
+                'Curriculum evaluation of academic credits and standing.'
+            ),
             'price': '50.00',
             'processing_days': 3,
             'is_active': True,
@@ -54,7 +84,9 @@ def seed_credential_types(apps, schema_editor):
             'code': 'COE',
             'doc_code': '4A',
             'name': 'Certification - Officially enrolled',
-            'description': 'Certificate verifying active enrollment and academic load.',
+            'description': (
+                'Certificate verifying active enrollment and academic load.'
+            ),
             'price': '80.00',
             'processing_days': 3,
             'is_active': True,
@@ -72,7 +104,9 @@ def seed_credential_types(apps, schema_editor):
             'code': 'UNITS',
             'doc_code': '4D',
             'name': 'Certification - Earned Units',
-            'description': 'Certification of academic units completed toward degree.',
+            'description': (
+                'Certification of academic units completed toward degree.'
+            ),
             'price': '80.00',
             'processing_days': 3,
             'is_active': True,
@@ -90,7 +124,9 @@ def seed_credential_types(apps, schema_editor):
             'code': 'CERT',
             'doc_code': '4',
             'name': 'Certification',
-            'description': 'University certification for academic or professional use.',
+            'description': (
+                'University certification for academic or professional use.'
+            ),
             'price': '80.00',
             'processing_days': 3,
             'is_active': True,
@@ -127,24 +163,69 @@ def seed_credential_types(apps, schema_editor):
             'is_active': item['is_active'],
         }
 
-        # Check if record with this code already exists
-        existing = CredentialType.objects.filter(code=code).first()
-        if existing:
+        # 1. Lookup by natural unique key 'code'
+        existing_by_code = CredentialType.objects.filter(code=code).first()
+        if existing_by_code:
             for k, v in defaults.items():
-                setattr(existing, k, v)
-            existing.save()
+                setattr(existing_by_code, k, v)
+            existing_by_code.save()
+            continue
+
+        # 2. Check if a record exists with the desired explicit_id
+        if explicit_id:
+            existing_by_id = CredentialType.objects.filter(pk=explicit_id).first()
+            if existing_by_id:
+                existing_by_id.code = code
+                for k, v in defaults.items():
+                    setattr(existing_by_id, k, v)
+                existing_by_id.save()
+                continue
+
+            # Neither code nor explicit_id exists; create using explicit_id
+            CredentialType.objects.update_or_create(
+                id=explicit_id,
+                defaults={'code': code, **defaults}
+            )
         else:
-            # If explicit id is available and unassigned, use it
-            if explicit_id and not CredentialType.objects.filter(
-                pk=explicit_id
-            ).exists():
-                defaults['id'] = explicit_id
-            defaults['code'] = code
-            CredentialType.objects.create(**defaults)
+            # No explicit id; create or update by natural key 'code'
+            CredentialType.objects.update_or_create(
+                code=code,
+                defaults=defaults
+            )
+
+        # Synchronize PostgreSQL sequence after every insert
+        sync_postgres_sequence(schema_editor, 'credentials_credentialtype', 'id')
+
+    # Final post-seeding sequence synchronization
+    sync_postgres_sequence(schema_editor, 'credentials_credentialtype', 'id')
 
 
 def unseed_credential_types(apps, schema_editor):
-    pass
+    """
+    Reversible migration rollback.
+    Deletes seeded credential types if they are not referenced by existing requests.
+    """
+    if 'pytest' in sys.modules or any('test' in arg for arg in sys.argv):
+        return
+
+    CredentialType = apps.get_model('credentials', 'CredentialType')
+    CredentialRequest = apps.get_model('credentials', 'CredentialRequest')
+
+    seed_codes = [
+        'TOR', 'HD', 'EVAL', 'CAR', 'COE', 'GPA',
+        'UNITS', 'GRADES', 'CERT', 'AUTH', 'ENDORSE'
+    ]
+
+    for code in seed_codes:
+        cred_type = CredentialType.objects.filter(code=code).first()
+        if cred_type:
+            # Only delete if not referenced by existing user requests
+            if not CredentialRequest.objects.filter(
+                credential_type=cred_type
+            ).exists():
+                cred_type.delete()
+
+    sync_postgres_sequence(schema_editor, 'credentials_credentialtype', 'id')
 
 
 class Migration(migrations.Migration):
@@ -159,3 +240,4 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(seed_credential_types, unseed_credential_types),
     ]
+
