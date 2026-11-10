@@ -1,18 +1,24 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.views import APIView
+from rest_framework.throttling import AnonRateThrottle
 from drf_spectacular.utils import extend_schema
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .serializers import (
     CustomTokenObtainPairSerializer,
     UserSerializer,
     UserCreateSerializer,
-    UserUpdateSerializer
+    UserUpdateSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetVerifySerializer,
+    PasswordResetConfirmSerializer,
 )
 from .permissions import IsAdminRole
-from .services import AccountService
+from .services import AccountService, PasswordResetService
 
 User = get_user_model()
 
@@ -86,3 +92,85 @@ class UserViewSet(viewsets.ModelViewSet):
             user=instance
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PasswordResetRequestView(APIView):
+    """
+    Public endpoint to request a 6-digit OTP for password reset.
+    Returns 200 OK regardless of whether the email exists (anti-enumeration).
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    @extend_schema(
+        request=PasswordResetRequestSerializer,
+        responses={200: dict}
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = PasswordResetService.request_otp(
+            serializer.validated_data['email']
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class PasswordResetVerifyView(APIView):
+    """
+    Public endpoint to verify an OTP before submitting new password.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    @extend_schema(
+        request=PasswordResetVerifySerializer,
+        responses={200: dict}
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = PasswordResetVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            PasswordResetService.verify_otp(
+                serializer.validated_data['email'],
+                serializer.validated_data['otp']
+            )
+            return Response(
+                {"detail": "Verification code is valid."},
+                status=status.HTTP_200_OK
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": str(exc.message if hasattr(exc, 'message') else exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class PasswordResetConfirmView(APIView):
+    """
+    Public endpoint to verify OTP and reset password.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    @extend_schema(
+        request=PasswordResetConfirmSerializer,
+        responses={200: dict}
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            PasswordResetService.reset_password(
+                serializer.validated_data['email'],
+                serializer.validated_data['otp'],
+                serializer.validated_data['new_password']
+            )
+            return Response(
+                {"detail": "Password has been reset successfully."},
+                status=status.HTTP_200_OK
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": str(exc.message if hasattr(exc, 'message') else exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
