@@ -196,4 +196,3 @@ class PasswordResetOTPTests(TestCase):
             'new_password': '123'
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
