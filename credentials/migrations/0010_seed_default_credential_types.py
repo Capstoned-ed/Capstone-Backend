@@ -240,4 +240,3 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(seed_credential_types, unseed_credential_types),
     ]
-
