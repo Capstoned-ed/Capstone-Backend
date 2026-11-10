@@ -25,7 +25,12 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenBlacklistView,
 )
-from accounts.views import CustomTokenObtainPairView
+from accounts.views import (
+    CustomTokenObtainPairView,
+    PasswordResetRequestView,
+    PasswordResetVerifyView,
+    PasswordResetConfirmView,
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -37,6 +42,23 @@ urlpatterns = [
     ),
     path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/logout/', TokenBlacklistView.as_view(), name='token_blacklist'),
+
+    # Password Reset OTP Endpoints
+    path(
+        'api/auth/password-reset/request/',
+        PasswordResetRequestView.as_view(),
+        name='password_reset_request'
+    ),
+    path(
+        'api/auth/password-reset/verify/',
+        PasswordResetVerifyView.as_view(),
+        name='password_reset_verify'
+    ),
+    path(
+        'api/auth/password-reset/confirm/',
+        PasswordResetConfirmView.as_view(),
+        name='password_reset_confirm'
+    ),
 
     # API Endpoints
     path('api/', include('accounts.urls')),

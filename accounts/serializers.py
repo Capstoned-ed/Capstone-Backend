@@ -4,6 +4,18 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        # Allow authenticating with either username or registered email
+        username_or_email = attrs.get(self.username_field)
+        if username_or_email:
+            user = (
+                User.objects.filter(email__iexact=username_or_email).first() or
+                User.objects.filter(username__iexact=username_or_email).first()
+            )
+            if user:
+                attrs[self.username_field] = user.username
+        return super().validate(attrs)
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
@@ -64,3 +76,45 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             'course_name': {'required': False},
             'course_code': {'required': False}
         }
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """
+    Request payload to trigger an OTP email.
+    """
+    email = serializers.CharField(
+        required=True,
+        help_text="Registered email address or username."
+    )
+
+
+class PasswordResetVerifySerializer(serializers.Serializer):
+    """
+    Payload to verify that an OTP code is valid.
+    """
+    email = serializers.CharField(required=True)
+    otp = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        required=True,
+        help_text="6-digit numeric OTP code."
+    )
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """
+    Payload to confirm OTP and set a new password.
+    """
+    email = serializers.CharField(required=True)
+    otp = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        required=True,
+        help_text="6-digit numeric OTP code."
+    )
+    new_password = serializers.CharField(
+        min_length=6,
+        write_only=True,
+        required=True,
+        help_text="New password (minimum 6 characters)."
+    )
