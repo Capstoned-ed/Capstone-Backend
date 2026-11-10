@@ -153,7 +153,11 @@ class CredentialRequestService:
             )
 
         validated_data['user'] = actor
-        credential_request = CredentialRequest.objects.create(**validated_data)
+        custom_doc_code = validated_data.pop('custom_doc_code', None)
+        credential_request = CredentialRequest(**validated_data)
+        if custom_doc_code:
+            credential_request._custom_doc_code = custom_doc_code
+        credential_request.save()
 
         AuditService.log_action(
             actor=actor,

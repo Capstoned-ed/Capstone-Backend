@@ -91,13 +91,16 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     """
     documents = NestedRequirementDocumentSerializer(many=True, read_only=True)
     payments = NestedPaymentSerializer(many=True, read_only=True)
+    custom_doc_code = serializers.CharField(
+        max_length=20, required=False, write_only=True
+    )
 
     class Meta:
         model = CredentialRequest
         fields = [
             'id', 'user', 'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
-            'documents', 'payments'
+            'documents', 'payments', 'custom_doc_code'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
