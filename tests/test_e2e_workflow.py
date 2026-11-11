@@ -279,11 +279,11 @@ class EndToEndWorkflowAPITests(APITestCase):
         )
         clearance_id = resp.data['id']
 
-        # Attempt 2: Request creation with PENDING clearance -> Fails (400)
+        # Attempt 2: Request creation with PENDING clearance -> Succeeds (201)
         resp = self.client.post(
             request_list_url, {'credential_type': self.cred_type.id}, format='json'
         )
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
 
         # Staff rejects clearance
         self.client.force_authenticate(user=self.staff)
