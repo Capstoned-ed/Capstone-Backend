@@ -143,13 +143,18 @@ class CredentialRequestService:
         clearance = (
             StudentClearance.objects
             .select_for_update()
-            .filter(user=actor, status=ClearanceStatus.APPROVED)
+            .filter(user=actor)
             .first()
         )
 
         if not clearance:
             raise ValidationError(
-                "You must have an APPROVED clearance to create a request."
+                "You must submit a clearance document before creating a request."
+            )
+
+        if clearance.status == ClearanceStatus.REJECTED:
+            raise ValidationError(
+                "Your previous clearance was rejected. Please re-upload a valid clearance before requesting a document."
             )
 
         validated_data['user'] = actor

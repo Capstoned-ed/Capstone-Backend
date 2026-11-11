@@ -137,11 +137,26 @@ class CredentialRequestValidationTests(TestCase):
                 validated_data={'credential_type': self.cred_type, 'remarks': ''}
             )
 
-    def test_create_request_fails_with_pending_clearance(self):
+    def test_create_request_success_with_pending_clearance(self):
         file = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         StudentClearanceService.submit_clearance(self.student, file)
+
+        req = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': self.cred_type, 'remarks': ''}
+        )
+        self.assertIsNotNone(req)
+
+    def test_create_request_fails_with_rejected_clearance(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+        StudentClearanceService.review_clearance(
+            self.staff, clearance, ClearanceStatus.REJECTED, remarks='Blurry image'
+        )
 
         with self.assertRaises(ValidationError):
             CredentialRequestService.create_request(
