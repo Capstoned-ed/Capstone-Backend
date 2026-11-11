@@ -21,6 +21,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
 
         # Add custom claims
+        token['username'] = user.username
         token['role'] = user.role
         token['force_password_change'] = user.force_password_change
 
@@ -39,6 +40,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'role',
+            'first_name', 'last_name',
             'course_name', 'course_code',
             'is_active', 'force_password_change',
             'date_joined', 'last_login'
@@ -71,7 +73,10 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['email', 'role', 'course_name', 'course_code', 'is_active']
+        fields = [
+            'email', 'role', 'first_name', 'last_name',
+            'course_name', 'course_code', 'is_active'
+        ]
         extra_kwargs = {
             'course_name': {'required': False},
             'course_code': {'required': False}
