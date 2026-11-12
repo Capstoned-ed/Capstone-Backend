@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import timedelta
 from django.conf import settings
@@ -11,6 +12,8 @@ from audit.services import AuditService
 from notifications.services import NotificationService
 from notifications.models import NotificationEvent
 from .models import PasswordResetOTP
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -208,13 +211,21 @@ class PasswordResetService:
             "— RegQuest Academic Credential Management System"
         )
 
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to send password reset OTP email to %s: %s",
+                user.email,
+                exc,
+                exc_info=True,
+            )
 
         AuditService.log_action(
             actor=user,
