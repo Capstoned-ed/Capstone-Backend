@@ -154,7 +154,8 @@ class CredentialRequestService:
 
         if clearance.status == ClearanceStatus.REJECTED:
             raise ValidationError(
-                "Your previous clearance was rejected. Please re-upload a valid clearance before requesting a document."
+                "Your previous clearance was rejected. Please re-upload "
+                "a valid clearance before requesting a document."
             )
 
         validated_data['user'] = actor
