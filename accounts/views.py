@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
@@ -13,6 +14,7 @@ from .serializers import (
     UserSerializer,
     UserCreateSerializer,
     UserUpdateSerializer,
+    SelfProfileUpdateSerializer,
     PasswordResetRequestSerializer,
     PasswordResetVerifySerializer,
     PasswordResetConfirmSerializer,
@@ -92,6 +94,27 @@ class UserViewSet(viewsets.ModelViewSet):
             user=instance
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(responses={200: UserSerializer})
+    @action(
+        detail=False,
+        methods=['get', 'patch'],
+        permission_classes=[IsAuthenticated],
+    )
+    def me(self, request):
+        if request.method == 'GET':
+            return Response(UserSerializer(request.user).data)
+
+        serializer = SelfProfileUpdateSerializer(
+            request.user, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = AccountService.update_user(
+            actor=request.user,
+            user=request.user,
+            validated_data=serializer.validated_data,
+        )
+        return Response(UserSerializer(updated).data)
 
 
 class PasswordResetRequestView(APIView):
