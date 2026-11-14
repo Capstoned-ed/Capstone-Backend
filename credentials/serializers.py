@@ -91,6 +91,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     """
     documents = NestedRequirementDocumentSerializer(many=True, read_only=True)
     payments = NestedPaymentSerializer(many=True, read_only=True)
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.CharField(source='user.username', read_only=True)
+    student_email = serializers.EmailField(source='user.email', read_only=True)
     custom_doc_code = serializers.CharField(
         max_length=20, required=False, write_only=True
     )
@@ -98,14 +101,23 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = CredentialRequest
         fields = [
-            'id', 'user', 'course', 'credential_type', 'status',
+            'id', 'user', 'student_name', 'student_id', 'student_email',
+            'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
             'documents', 'payments', 'custom_doc_code'
         ]
         read_only_fields = [
-            'user', 'status', 'tracking_number', 'created_at', 'updated_at',
+            'user', 'student_name', 'student_id', 'student_email',
+            'status', 'tracking_number', 'created_at', 'updated_at',
             'documents', 'payments'
         ]
+
+    def get_student_name(self, obj):
+        user = getattr(obj, 'user', None)
+        if not user:
+            return ''
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        return full_name or user.username or ''
 
     def validate_credential_type(self, value):
         if not value.is_active:

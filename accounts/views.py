@@ -19,7 +19,7 @@ from .serializers import (
     PasswordResetVerifySerializer,
     PasswordResetConfirmSerializer,
 )
-from .permissions import IsAdminRole
+from .permissions import IsAdminRole, IsRegistrar, IsStaffRole
 from .services import AccountService, PasswordResetService
 
 User = get_user_model()
@@ -37,9 +37,15 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 class UserViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows admins to view or edit users.
+    Registrars and staff can list/retrieve users for request assignment and display.
     Supports soft deletion.
     """
     permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [IsAuthenticated(), (IsAdminRole | IsRegistrar | IsStaffRole)()]
+        return [IsAuthenticated(), IsAdminRole()]
 
     def get_queryset(self):
         qs = User.objects.all().order_by('-date_joined')

@@ -14,7 +14,7 @@ from .models import (
 )
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
-from accounts.models import Role
+from accounts.models import Role, User
 
 
 class CredentialTypeService:
@@ -102,15 +102,15 @@ class CredentialRequestService:
     TRANSITION_MATRIX = {
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
-                'roles': [Role.STAFF, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
+            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -118,9 +118,9 @@ class CredentialRequestService:
         ],
         RequestStatus.PAYMENT_PENDING: [
             {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
@@ -128,8 +128,8 @@ class CredentialRequestService:
         ],
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': [Role.REGISTRAR, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.REGISTRAR, Role.ADMIN]}
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
+            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
             {'status': RequestStatus.RELEASED, 'roles': [
@@ -230,8 +230,20 @@ class CredentialRequestService:
         }
 
         credential_request.status = new_status
-        if remarks is not None:
-            credential_request.remarks = remarks
+        new_remarks = remarks.strip() if isinstance(remarks, str) else remarks
+        if new_remarks:
+            existing_remarks = str(credential_request.remarks or '').strip()
+            import re
+            doc_tag_match = re.match(r'^(\[[^\]]+\])', existing_remarks)
+            if doc_tag_match and not new_remarks.startswith('['):
+                doc_tag = doc_tag_match.group(1)
+                tag_lower = doc_tag.lower()
+                if 'staff' not in tag_lower and 'walk-in' not in tag_lower and 'ftf' not in tag_lower:
+                    credential_request.remarks = f"{doc_tag} {new_remarks}"
+                else:
+                    credential_request.remarks = new_remarks
+            else:
+                credential_request.remarks = new_remarks
         credential_request.save()
 
         new_state = {
@@ -260,6 +272,17 @@ class CredentialRequestService:
                 related_object_type='CredentialRequest',
                 related_object_id=str(credential_request.id)
             )
+            if actor and actor != credential_request.user:
+                NotificationService.create_notification(
+                    recipient=actor,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                    message=(
+                        f"You updated request ({credential_request.tracking_number}) "
+                        f"status to {new_status}."
+                    ),
+                    related_object_type='CredentialRequest',
+                    related_object_id=str(credential_request.id)
+                )
 
         return credential_request
 
@@ -382,6 +405,14 @@ class StudentClearanceService:
             related_object_type='StudentClearance',
             related_object_id=str(clearance.id)
         )
+        if actor and actor != clearance.user:
+            NotificationService.create_notification(
+                recipient=actor,
+                event_type=notification_event,
+                message=f"You {status.lower()} clearance for {clearance.user.username}.",
+                related_object_type='StudentClearance',
+                related_object_id=str(clearance.id)
+            )
 
         return clearance
 
@@ -427,6 +458,49 @@ class PaymentService:
                 'status': payment.status
             }
         )
+
+        student_name = (
+            f"{actor.first_name or ''} {actor.last_name or ''}".strip()
+            or actor.username
+        )
+        from audit.models import AuditLog
+        last_staff_log = (
+            AuditLog.objects
+            .filter(
+                object_type='CredentialRequest',
+                object_id=str(request.id),
+                actor__role=Role.STAFF,
+                actor__is_active=True,
+            )
+            .select_related('actor')
+            .order_by('-timestamp')
+            .first()
+        )
+        registrar_recipients = list(
+            User.objects.filter(role=Role.REGISTRAR, is_active=True)
+        )
+        if last_staff_log and last_staff_log.actor:
+            staff_recipients = [last_staff_log.actor] + registrar_recipients
+        else:
+            staff_recipients = list(
+                User.objects.filter(
+                    role__in=[Role.STAFF, Role.REGISTRAR],
+                    is_active=True
+                )
+            )
+        notify_msg = (
+            f"{student_name} submitted payment proof for request "
+            f"({request.tracking_number})."
+        )
+        for recipient in staff_recipients:
+            NotificationService.create_notification(
+                recipient=recipient,
+                event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                message=notify_msg,
+                related_object_type='CredentialRequest',
+                related_object_id=str(request.id)
+            )
+
         return payment
 
     @staticmethod
@@ -486,6 +560,17 @@ class PaymentService:
                 related_object_type='Payment',
                 related_object_id=str(payment.id)
             )
+            if actor and actor != payment.request.user:
+                NotificationService.create_notification(
+                    recipient=actor,
+                    event_type=NotificationEvent.PAYMENT_VERIFIED,
+                    message=(
+                        f"You verified OTC payment for request "
+                        f"{payment.request.tracking_number}."
+                    ),
+                    related_object_type='Payment',
+                    related_object_id=str(payment.id)
+                )
         else:
             NotificationService.create_notification(
                 recipient=payment.request.user,
@@ -498,5 +583,16 @@ class PaymentService:
                 related_object_type='Payment',
                 related_object_id=str(payment.id)
             )
+            if actor and actor != payment.request.user:
+                NotificationService.create_notification(
+                    recipient=actor,
+                    event_type=NotificationEvent.PAYMENT_REJECTED,
+                    message=(
+                        f"You rejected OTC payment for request "
+                        f"{payment.request.tracking_number}."
+                    ),
+                    related_object_type='Payment',
+                    related_object_id=str(payment.id)
+                )
 
         return payment
