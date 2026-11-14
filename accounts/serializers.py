@@ -102,7 +102,10 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['first_name', 'last_name', 'email', 'birth_date', 'contact_number', 'year_level']
+        fields = [
+            'first_name', 'last_name', 'email',
+            'birth_date', 'contact_number', 'year_level'
+        ]
         extra_kwargs = {
             'first_name': {'required': False},
             'last_name': {'required': False},

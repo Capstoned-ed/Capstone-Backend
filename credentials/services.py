@@ -110,7 +110,8 @@ class CredentialRequestService:
                 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
                 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -120,7 +121,8 @@ class CredentialRequestService:
             {'status': RequestStatus.PAYMENT_VERIFIED,
                 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
@@ -129,7 +131,8 @@ class CredentialRequestService:
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE,
                 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
             {'status': RequestStatus.RELEASED, 'roles': [
@@ -238,7 +241,11 @@ class CredentialRequestService:
             if doc_tag_match and not new_remarks.startswith('['):
                 doc_tag = doc_tag_match.group(1)
                 tag_lower = doc_tag.lower()
-                if 'staff' not in tag_lower and 'walk-in' not in tag_lower and 'ftf' not in tag_lower:
+                if (
+                    'staff' not in tag_lower
+                    and 'walk-in' not in tag_lower
+                    and 'ftf' not in tag_lower
+                ):
                     credential_request.remarks = f"{doc_tag} {new_remarks}"
                 else:
                     credential_request.remarks = new_remarks
@@ -409,7 +416,10 @@ class StudentClearanceService:
             NotificationService.create_notification(
                 recipient=actor,
                 event_type=notification_event,
-                message=f"You {status.lower()} clearance for {clearance.user.username}.",
+                message=(
+                    f"You {status.lower()} clearance for "
+                    f"{clearance.user.username}."
+                ),
                 related_object_type='StudentClearance',
                 related_object_id=str(clearance.id)
             )
