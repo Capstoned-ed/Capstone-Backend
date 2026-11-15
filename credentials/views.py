@@ -132,6 +132,30 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = str(self.kwargs[lookup_url_kwarg]).strip()
+
+        # 1. Attempt lookup by UUID pk
+        try:
+            import uuid
+            uuid_val = uuid.UUID(lookup_value)
+            obj = queryset.filter(pk=uuid_val).first()
+            if obj:
+                self.check_object_permissions(self.request, obj)
+                return obj
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+        # 2. Attempt lookup by tracking_number
+        obj = queryset.filter(tracking_number__iexact=lookup_value).first()
+        if obj:
+            self.check_object_permissions(self.request, obj)
+            return obj
+
+        return super().get_object()
+
     @extend_schema(responses={201: CredentialRequestSerializer})
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
