@@ -103,6 +103,10 @@ class CredentialRequestService:
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
                 'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.PAYMENT_PENDING,
+                'roles': [Role.STAFF, Role.ADMIN]},
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
