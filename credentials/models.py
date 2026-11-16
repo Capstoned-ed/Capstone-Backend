@@ -115,6 +115,17 @@ class CredentialRequest(models.Model):
         on_delete=models.PROTECT,
         related_name='requests'
     )
+    assigned_staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_credential_requests'
+    )
+    in_process_queue = models.BooleanField(
+        default=False,
+        help_text="Designates whether request is in active processing queue."
+    )
     status = models.CharField(
         max_length=50,
         choices=RequestStatus.choices,
@@ -135,6 +146,8 @@ class CredentialRequest(models.Model):
             models.Index(fields=['status']),
             models.Index(fields=['user']),
             models.Index(fields=['tracking_number']),
+            models.Index(fields=['assigned_staff']),
+            models.Index(fields=['in_process_queue']),
         ]
 
     def save(self, *args, **kwargs):

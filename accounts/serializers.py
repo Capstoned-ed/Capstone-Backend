@@ -65,6 +65,13 @@ class UserCreateSerializer(serializers.ModelSerializer):
     Note: Password hashing is delegated to AccountService.create_user (which calls
     create_user()), so no custom create() override is needed here.
     """
+    first_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    last_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+
     class Meta:
         model = User
         fields = [
@@ -74,7 +81,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'birth_date', 'contact_number', 'year_level',
         ]
         extra_kwargs = {
-            'password': {'write_only': True},
+            'password': {'write_only': True, 'required': False},
             'first_name': {'required': False},
             'last_name': {'required': False},
             'course_name': {'required': False},
@@ -83,6 +90,20 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'contact_number': {'required': False},
             'year_level': {'required': False},
         }
+
+    def validate_role(self, value):
+        from .models import Role
+        val = str(value).strip().lower()
+        if val not in Role.values:
+            raise serializers.ValidationError(
+                f"Invalid role '{value}'. Choices: {', '.join(Role.values)}"
+            )
+        return val
+
+    def validate(self, attrs):
+        if not attrs.get('password'):
+            attrs['password'] = attrs.get('username')
+        return attrs
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):

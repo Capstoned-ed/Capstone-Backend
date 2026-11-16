@@ -1,4 +1,5 @@
-from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db import transaction, models
 from audit.services import AuditService
 from notifications.services import NotificationService
 from notifications.models import NotificationEvent
@@ -15,6 +16,8 @@ from .models import (
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
 from accounts.models import Role
+
+User = get_user_model()
 
 
 class CredentialTypeService:
@@ -114,7 +117,8 @@ class CredentialRequestService:
                 'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
                 'roles': [Role.STAFF, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.ADMIN]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -124,21 +128,36 @@ class CredentialRequestService:
             {'status': RequestStatus.PAYMENT_VERIFIED,
                 'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.STAFF, Role.ADMIN]}
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.ADMIN]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN]}
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+            ]}
         ],
         RequestStatus.PROCESSING: [
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': [Role.REGISTRAR, Role.ADMIN]},
-            {'status': RequestStatus.REJECTED, 'roles': [Role.REGISTRAR, Role.ADMIN]}
+            {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
             {'status': RequestStatus.RELEASED, 'roles': [
-                Role.STAFF, Role.REGISTRAR, Role.ADMIN]}
-        ]
+                Role.REGISTRAR, Role.ADMIN, Role.STAFF
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]}
+        ],
+        RequestStatus.RELEASED: [],
+        RequestStatus.REJECTED: [],
+        RequestStatus.CANCELLED: []
     }
 
     @staticmethod
@@ -200,7 +219,10 @@ class CredentialRequestService:
 
     @staticmethod
     @transaction.atomic
-    def transition_request(actor, credential_request, new_status, remarks=""):
+    def transition_request(
+        actor, credential_request, new_status, remarks="",
+        assigned_staff=None, in_process_queue=None
+    ):
         credential_request = (
             CredentialRequest.objects
             .select_for_update()
@@ -208,8 +230,52 @@ class CredentialRequestService:
         )
         current_status = credential_request.status
 
+        # Normalize status to canonical RequestStatus enum
+        status_map = {
+            'PENDING': RequestStatus.PENDING,
+            'REQUIREMENTS_VERIFICATION': RequestStatus.REQUIREMENTS_VERIFICATION,
+            'REQUIREMENTS_REJECTED': RequestStatus.REQUIREMENTS_REJECTED,
+            'PAYMENT_PENDING': RequestStatus.PAYMENT_PENDING,
+            'PAYMENT_VERIFIED': RequestStatus.PAYMENT_VERIFIED,
+            'PROCESSING': RequestStatus.PROCESSING,
+            'READY_FOR_RELEASE': RequestStatus.READY_FOR_RELEASE,
+            'RELEASED': RequestStatus.RELEASED,
+            'REJECTED': RequestStatus.REJECTED,
+            'CANCELLED': RequestStatus.CANCELLED,
+            'FOR PAYMENT': RequestStatus.PAYMENT_PENDING,
+            'FOR_PAYMENT': RequestStatus.PAYMENT_PENDING,
+            'FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+            'FOR_PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+            'READY FOR PICKUP': RequestStatus.READY_FOR_RELEASE,
+            'READY_FOR_PICKUP': RequestStatus.READY_FOR_RELEASE,
+            'READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+            'RELEASING': RequestStatus.READY_FOR_RELEASE,
+            'CLAIMED': RequestStatus.RELEASED,
+            'COMPLETED': RequestStatus.RELEASED,
+        }
+        clean_key = str(new_status).strip().upper().replace('-', '_')
+        canonical_status = status_map.get(clean_key, clean_key)
+
+        # Handle staff assignment if provided
+        if assigned_staff is not None:
+            if isinstance(assigned_staff, User):
+                credential_request.assigned_staff = assigned_staff
+                credential_request.in_process_queue = True
+            elif isinstance(assigned_staff, (str, int)) and str(assigned_staff).strip():
+                s_ident = str(assigned_staff).strip()
+                s_user = User.objects.filter(
+                    models.Q(username__iexact=s_ident) |
+                    models.Q(id=int(s_ident) if s_ident.isdigit() else -1)
+                ).first()
+                if s_user:
+                    credential_request.assigned_staff = s_user
+                    credential_request.in_process_queue = True
+
+        if in_process_queue is not None:
+            credential_request.in_process_queue = bool(in_process_queue)
+
         # Allow Staff/Registrar/Admin to update remarks without changing status
-        if new_status == current_status:
+        if canonical_status == current_status:
             if actor.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
                 raise PermissionDenied(
                     "You do not have permission to update request remarks."
@@ -229,24 +295,26 @@ class CredentialRequestService:
                     },
                     new_state={'status': current_status, 'remarks': remarks}
                 )
+            else:
+                credential_request.save()
             return credential_request
 
         allowed_transitions = CredentialRequestService.TRANSITION_MATRIX.get(
             current_status, [])
 
         transition = next(
-            (t for t in allowed_transitions if t['status'] == new_status), None)
+            (t for t in allowed_transitions if t['status'] == canonical_status), None)
 
         if not transition:
             raise ValidationError(
-                f"Invalid transition from {current_status} to {new_status}.")
+                f"Invalid transition from {current_status} to {canonical_status}.")
 
         if actor.role not in transition['roles']:
             raise PermissionDenied(
                 "You do not have permission to perform this transition."
             )
 
-        if new_status in [
+        if canonical_status in [
             RequestStatus.REJECTED,
             RequestStatus.REQUIREMENTS_REJECTED
         ] and not remarks:
@@ -257,9 +325,17 @@ class CredentialRequestService:
             'remarks': credential_request.remarks
         }
 
-        credential_request.status = new_status
+        credential_request.status = canonical_status
         if remarks is not None:
             credential_request.remarks = remarks
+
+        if canonical_status in [
+            RequestStatus.RELEASED,
+            RequestStatus.REJECTED,
+            RequestStatus.CANCELLED
+        ]:
+            credential_request.in_process_queue = False
+
         credential_request.save()
 
         new_state = {
@@ -269,7 +345,7 @@ class CredentialRequestService:
 
         AuditService.log_action(
             actor=actor,
-            action=f'REQUEST_STATUS_CHANGED_{new_status}',
+            action=f'REQUEST_STATUS_CHANGED_{canonical_status}',
             object_type='CredentialRequest',
             object_id=credential_request.id,
             previous_state=previous_state,
@@ -279,7 +355,7 @@ class CredentialRequestService:
         if actor.role != Role.STUDENT:
             msg = (
                 f"Your request ({credential_request.tracking_number}) "
-                f"status changed to {new_status}."
+                f"status changed to {canonical_status}."
             )
             NotificationService.create_notification(
                 recipient=credential_request.user,
