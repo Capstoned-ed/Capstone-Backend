@@ -226,7 +226,9 @@ class StudentClearanceAPITests(APITestCase):
         self.client.force_authenticate(user=self.staff)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
 
-        response = self.client.patch(url, {'status': ClearanceStatus.APPROVED})
+        response = self.client.patch(
+            url, {'status': ClearanceStatus.APPROVED}, format='json'
+        )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], ClearanceStatus.APPROVED)
 
