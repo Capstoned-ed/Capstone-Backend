@@ -128,6 +128,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     credential_name = serializers.SerializerMethodField()
     credential_code = serializers.SerializerMethodField()
     assigned_staff = serializers.SerializerMethodField()
+    assigned_to = serializers.SerializerMethodField()
     in_process_queue = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -138,13 +139,13 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'documents', 'payments', 'custom_doc_code',
             'student_name', 'student_id', 'student_email',
             'credential_name', 'credential_code', 'assigned_staff',
-            'in_process_queue'
+            'assigned_to', 'in_process_queue'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
             'documents', 'payments', 'student_name', 'student_id',
             'student_email', 'credential_name', 'credential_code',
-            'assigned_staff', 'in_process_queue'
+            'assigned_staff', 'assigned_to', 'in_process_queue'
         ]
 
     def get_student_name(self, obj):
@@ -217,6 +218,16 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         if match2:
             return match2.group(1).strip()
         return ''
+
+    def get_assigned_to(self, obj):
+        staff = (
+            obj.get('assigned_staff')
+            if isinstance(obj, dict)
+            else getattr(obj, 'assigned_staff', None)
+        )
+        if staff and hasattr(staff, 'id'):
+            return staff.id
+        return None
 
     def validate_credential_type(self, value):
         if not value.is_active:

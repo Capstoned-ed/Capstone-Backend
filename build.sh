@@ -11,5 +11,8 @@ python manage.py collectstatic --no-input
 echo "==> Applying database migrations..."
 python manage.py migrate --no-input
 
+echo "==> Seeding default admin account..."
+python manage.py seed_admin
+
 echo "==> Build complete!"
 

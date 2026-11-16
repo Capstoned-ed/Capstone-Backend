@@ -267,6 +267,12 @@ class CredentialRequestService:
                     models.Q(username__iexact=s_ident) |
                     models.Q(id=int(s_ident) if s_ident.isdigit() else -1)
                 ).first()
+                if not s_user and ' ' in s_ident:
+                    parts = s_ident.split(None, 1)
+                    s_user = User.objects.filter(
+                        first_name__iexact=parts[0],
+                        last_name__iexact=parts[1]
+                    ).first()
                 if s_user:
                     credential_request.assigned_staff = s_user
                     credential_request.in_process_queue = True
