@@ -270,7 +270,7 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
     API endpoint for managing student clearances.
     """
     permission_classes = [StudentClearancePermission]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         qs = StudentClearance.objects.select_related('user').order_by('-updated_at')
