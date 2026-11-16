@@ -296,7 +296,9 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         )
 
         return Response(
-            CredentialRequestSerializer(credential_request).data,
+            CredentialRequestSerializer(
+                credential_request, context={'request': request}
+            ).data,
             status=status.HTTP_200_OK
         )
 
@@ -325,7 +327,11 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             in_process_queue=in_process_queue
         )
 
-        return Response(CredentialRequestSerializer(updated_request).data)
+        return Response(
+            CredentialRequestSerializer(
+                updated_request, context={'request': request}
+            ).data
+        )
 
 
 class RequirementDocumentViewSet(viewsets.ModelViewSet):
@@ -440,7 +446,11 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
             status=serializer.validated_data.get('status'),
             remarks=serializer.validated_data.get('remarks', '')
         )
-        return Response(StudentClearanceSerializer(updated_clearance).data)
+        return Response(
+            StudentClearanceSerializer(
+                updated_clearance, context={'request': request}
+            ).data
+        )
 
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):

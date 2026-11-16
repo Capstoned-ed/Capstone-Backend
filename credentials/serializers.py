@@ -8,7 +8,8 @@ from .models import (
     RequirementDocument,
     StudentClearance,
     Payment,
-    RequestStatus
+    RequestStatus,
+    ClearanceStatus
 )
 
 
@@ -130,6 +131,11 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     assigned_staff = serializers.SerializerMethodField()
     assigned_to = serializers.SerializerMethodField()
     in_process_queue = serializers.BooleanField(read_only=True)
+    clearance_id = serializers.SerializerMethodField()
+    clearance_status = serializers.SerializerMethodField()
+    clearance_preview = serializers.SerializerMethodField()
+    clearance_file_name = serializers.SerializerMethodField()
+    clearance_is_pdf = serializers.SerializerMethodField()
 
     class Meta:
         model = CredentialRequest
@@ -139,13 +145,17 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'documents', 'payments', 'custom_doc_code',
             'student_name', 'student_id', 'student_email',
             'credential_name', 'credential_code', 'assigned_staff',
-            'assigned_to', 'in_process_queue'
+            'assigned_to', 'in_process_queue',
+            'clearance_id', 'clearance_status', 'clearance_preview',
+            'clearance_file_name', 'clearance_is_pdf'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
             'documents', 'payments', 'student_name', 'student_id',
             'student_email', 'credential_name', 'credential_code',
-            'assigned_staff', 'assigned_to', 'in_process_queue'
+            'assigned_staff', 'assigned_to', 'in_process_queue',
+            'clearance_id', 'clearance_status', 'clearance_preview',
+            'clearance_file_name', 'clearance_is_pdf'
         ]
 
     def get_student_name(self, obj):
@@ -229,6 +239,51 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             return staff.id
         return None
 
+    def _get_clearance(self, obj):
+        user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
+        if not user:
+            return None
+        if hasattr(user, 'clearance'):
+            try:
+                return user.clearance
+            except Exception:
+                pass
+        if isinstance(user, int):
+            return StudentClearance.objects.filter(user_id=user).first()
+        return StudentClearance.objects.filter(user=user).first()
+
+    def get_clearance_id(self, obj):
+        clearance = self._get_clearance(obj)
+        return str(clearance.id) if clearance else None
+
+    def get_clearance_status(self, obj):
+        clearance = self._get_clearance(obj)
+        return clearance.status if clearance else 'NOT_ATTACHED'
+
+    def get_clearance_preview(self, obj):
+        clearance = self._get_clearance(obj)
+        if not clearance or not clearance.file:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(
+                reverse('studentclearance-download', kwargs={'pk': clearance.pk})
+            )
+        return None
+
+    def get_clearance_file_name(self, obj):
+        clearance = self._get_clearance(obj)
+        if not clearance or not clearance.file or not clearance.file.name:
+            return None
+        from pathlib import Path
+        return Path(clearance.file.name).name
+
+    def get_clearance_is_pdf(self, obj):
+        clearance = self._get_clearance(obj)
+        if not clearance or not clearance.file or not clearance.file.name:
+            return False
+        return clearance.file.name.lower().endswith('.pdf')
+
     def validate_credential_type(self, value):
         if not value.is_active:
             raise serializers.ValidationError(
@@ -257,11 +312,13 @@ class RequirementDocumentSerializer(serializers.ModelSerializer):
         return ret
 
     def validate_request(self, value):
-        user = self.context['request'].user
-        if user.role == Role.STUDENT and value.user != user:
-            raise serializers.ValidationError(
-                "You can only upload documents to your own credential requests."
-            )
+        request_obj = self.context.get('request')
+        if request_obj and hasattr(request_obj, 'user'):
+            user = request_obj.user
+            if user.role == Role.STUDENT and value.user != user:
+                raise serializers.ValidationError(
+                    "You can only upload documents to your own credential requests."
+                )
 
         UPLOADABLE_STATUSES = [
             RequestStatus.PENDING,
@@ -311,9 +368,37 @@ class StudentClearanceReviewSerializer(serializers.ModelSerializer):
     """
     Validation layer for staff reviewing a student clearance.
     """
+    status = serializers.CharField(max_length=50)
+    remarks = serializers.CharField(
+        required=False, allow_blank=True, default=''
+    )
+
     class Meta:
         model = StudentClearance
         fields = ['status', 'remarks']
+
+    def validate_status(self, value):
+        val = str(value).strip().upper()
+        if val in ['VERIFIED', 'APPROVED', ClearanceStatus.APPROVED]:
+            return ClearanceStatus.APPROVED
+        if val in ['REJECTED', 'NOT_VERIFIED', ClearanceStatus.REJECTED]:
+            return ClearanceStatus.REJECTED
+        if val in ['PENDING', 'RESET', ClearanceStatus.PENDING]:
+            return ClearanceStatus.PENDING
+        raise serializers.ValidationError(
+            f"Invalid clearance status '{value}'. "
+            "Allowed values are APPROVED, REJECTED, or PENDING."
+        )
+
+    def validate(self, attrs):
+        status_val = attrs.get('status')
+        remarks_val = attrs.get('remarks', '')
+        remarks_clean = str(remarks_val).strip() if remarks_val is not None else ''
+        if status_val == ClearanceStatus.REJECTED and not remarks_clean:
+            raise serializers.ValidationError(
+                {'remarks': "Remarks are required when rejecting a clearance."}
+            )
+        return attrs
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -332,6 +417,21 @@ class PaymentSerializer(serializers.ModelSerializer):
             'uploaded_at', 'updated_at'
         ]
 
+    def to_internal_value(self, data):
+        if hasattr(data, '_mutable'):
+            data = data.copy()
+        elif isinstance(data, dict):
+            data = data.copy()
+
+        amount_val = data.get('amount') if isinstance(data, dict) else None
+        if amount_val is not None:
+            if isinstance(amount_val, str):
+                import re
+                cleaned = re.sub(r'[^\d.]', '', amount_val)
+                data['amount'] = cleaned if cleaned else '0.00'
+
+        return super().to_internal_value(data)
+
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         request = self.context.get('request')
@@ -343,11 +443,13 @@ class PaymentSerializer(serializers.ModelSerializer):
         return ret
 
     def validate_request(self, value):
-        user = self.context['request'].user
-        if user.role == Role.STUDENT and value.user != user:
-            raise serializers.ValidationError(
-                "You can only submit payments for your own requests."
-            )
+        request_obj = self.context.get('request')
+        if request_obj and hasattr(request_obj, 'user'):
+            user = request_obj.user
+            if user.role == Role.STUDENT and value.user != user:
+                raise serializers.ValidationError(
+                    "You can only submit payments for your own requests."
+                )
         return value
 
     def validate(self, data):

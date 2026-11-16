@@ -277,3 +277,142 @@ class StudentClearanceAPITests(APITestCase):
         self.client.force_authenticate(user=self.student)
         res = self.client.get(url)
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_staff_review_clearance_with_verified_status(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
+
+        response = self.client.patch(
+            url, {'status': 'VERIFIED'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], ClearanceStatus.APPROVED)
+
+    def test_staff_review_clearance_idempotent(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
+
+        # First review: Approve
+        res1 = self.client.patch(url, {'status': 'APPROVED'}, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(res1.data['status'], ClearanceStatus.APPROVED)
+
+        # Second review: Idempotent re-approval succeeds without 400
+        res2 = self.client.patch(url, {'status': 'APPROVED'}, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data['status'], ClearanceStatus.APPROVED)
+
+    def test_staff_review_clearance_reject_requires_remarks(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
+
+        # Reject without remarks causes 400
+        res1 = self.client.patch(url, {'status': 'REJECTED'}, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Reject with remarks succeeds
+        res2 = self.client.patch(
+            url, {'status': 'REJECTED', 'remarks': 'Missing signature.'}, format='json'
+        )
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data['status'], ClearanceStatus.REJECTED)
+        self.assertEqual(res2.data['remarks'], 'Missing signature.')
+
+    def test_credential_request_serializer_clearance_fields(self):
+        from credentials.serializers import CredentialRequestSerializer
+        file = SimpleUploadedFile(
+            "clearance_doc.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+        cred_type = CredentialType.objects.create(
+            code="CT1", name="Test Cert", price=100.0, processing_days=3
+        )
+        req = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': cred_type, 'remarks': 'Need copy'}
+        )
+
+        data = CredentialRequestSerializer(req).data
+        self.assertEqual(data['clearance_id'], str(clearance.id))
+        self.assertEqual(data['clearance_status'], ClearanceStatus.PENDING)
+        self.assertTrue(data['clearance_file_name'].endswith('.pdf'))
+        self.assertTrue(data['clearance_is_pdf'])
+
+    def test_payment_serializer_currency_sanitization(self):
+        from credentials.serializers import PaymentSerializer
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearanceService.submit_clearance(self.student, file)
+        cred_type = CredentialType.objects.create(
+            code="CT2", name="TOR", price=150.0, processing_days=3
+        )
+        req = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': cred_type, 'remarks': ''}
+        )
+
+        receipt = SimpleUploadedFile(
+            "receipt.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        serializer = PaymentSerializer(data={
+            'request': req.id,
+            'amount': '₱150.00',
+            'receipt_image': receipt,
+            'receipt_reference_number': 'OR-9988'
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(str(serializer.validated_data['amount']), '150.00')
+
+    def test_registrar_and_staff_transitions(self):
+        from credentials.models import RequestStatus
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearanceService.submit_clearance(self.student, file)
+        cred_type = CredentialType.objects.create(
+            code="CT3", name="HD", price=100.0, processing_days=3
+        )
+        req = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': cred_type, 'remarks': ''}
+        )
+        req.status = RequestStatus.PROCESSING
+        req.save()
+
+        registrar = User.objects.create_user(
+            username='reg1', email='r1@test.com', password='p', role=Role.REGISTRAR
+        )
+
+        # Registrar can transition PROCESSING -> READY_FOR_RELEASE
+        updated = CredentialRequestService.transition_request(
+            actor=registrar,
+            credential_request=req,
+            new_status=RequestStatus.READY_FOR_RELEASE,
+            remarks="Document is printed and signed."
+        )
+        self.assertEqual(updated.status, RequestStatus.READY_FOR_RELEASE)
+
+        # Staff can transition READY_FOR_RELEASE -> RELEASED
+        final_req = CredentialRequestService.transition_request(
+            actor=self.staff,
+            credential_request=updated,
+            new_status=RequestStatus.RELEASED,
+            remarks="Claimed by student."
+        )
+        self.assertEqual(final_req.status, RequestStatus.RELEASED)
