@@ -141,10 +141,10 @@ class CredentialRequestService:
         ],
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.ADMIN
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.ADMIN
             ]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
@@ -152,7 +152,7 @@ class CredentialRequestService:
                 Role.REGISTRAR, Role.ADMIN, Role.STAFF
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.ADMIN
             ]}
         ],
         RequestStatus.RELEASED: [],

@@ -393,8 +393,11 @@ class StudentClearanceReviewSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         status_val = attrs.get('status')
         remarks_val = attrs.get('remarks', '')
-        if status_val == ClearanceStatus.REJECTED and not remarks_val:
-            attrs['remarks'] = "Clearance rejected by staff."
+        remarks_clean = str(remarks_val).strip() if remarks_val is not None else ''
+        if status_val == ClearanceStatus.REJECTED and not remarks_clean:
+            raise serializers.ValidationError(
+                {'remarks': "Remarks are required when rejecting a clearance."}
+            )
         return attrs
 
 
