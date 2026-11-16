@@ -1,3 +1,4 @@
+from django.db import models
 from rest_framework import serializers
 from django.urls import reverse
 from accounts.models import Role
@@ -85,10 +86,37 @@ class NestedRequirementDocumentSerializer(serializers.ModelSerializer):
         return None
 
 
+class CredentialTypeRelatedField(serializers.PrimaryKeyRelatedField):
+    """
+    Flexible related field that accepts:
+    - Primary Key integer / numeric string ID (e.g. 1, '1')
+    - CredentialType code (e.g. 'TOR', 'HD', 'COE')
+    - CredentialType name (e.g. 'Transcript of Records (TOR)')
+    """
+    def to_internal_value(self, data):
+        if isinstance(data, CredentialType):
+            return data
+        if isinstance(data, str) and not data.isdigit():
+            clean = data.strip()
+            ctype = CredentialType.objects.filter(
+                models.Q(code__iexact=clean) | models.Q(name__iexact=clean)
+            ).first()
+            if not ctype:
+                ctype = CredentialType.objects.filter(
+                    models.Q(name__icontains=clean) | models.Q(code__icontains=clean)
+                ).first()
+            if ctype:
+                return ctype
+        return super().to_internal_value(data)
+
+
 class CredentialRequestSerializer(serializers.ModelSerializer):
     """
     Representation of a CredentialRequest.
     """
+    credential_type = CredentialTypeRelatedField(
+        queryset=CredentialType.objects.all()
+    )
     documents = NestedRequirementDocumentSerializer(many=True, read_only=True)
     payments = NestedPaymentSerializer(many=True, read_only=True)
     custom_doc_code = serializers.CharField(
@@ -100,6 +128,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     credential_name = serializers.SerializerMethodField()
     credential_code = serializers.SerializerMethodField()
     assigned_staff = serializers.SerializerMethodField()
+    in_process_queue = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = CredentialRequest
@@ -108,12 +137,14 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'tracking_number', 'remarks', 'created_at', 'updated_at',
             'documents', 'payments', 'custom_doc_code',
             'student_name', 'student_id', 'student_email',
-            'credential_name', 'credential_code', 'assigned_staff'
+            'credential_name', 'credential_code', 'assigned_staff',
+            'in_process_queue'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
             'documents', 'payments', 'student_name', 'student_id',
-            'student_email', 'credential_name', 'credential_code', 'assigned_staff'
+            'student_email', 'credential_name', 'credential_code',
+            'assigned_staff', 'in_process_queue'
         ]
 
     def get_student_name(self, obj):
@@ -158,6 +189,16 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         return ''
 
     def get_assigned_staff(self, obj):
+        staff = (
+            obj.get('assigned_staff')
+            if isinstance(obj, dict)
+            else getattr(obj, 'assigned_staff', None)
+        )
+        if staff:
+            if hasattr(staff, 'username'):
+                return staff.username
+            if isinstance(staff, str):
+                return staff
         remarks = (
             obj.get('remarks')
             if isinstance(obj, dict)

@@ -5,8 +5,11 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from pathlib import Path
+from django.contrib.auth import get_user_model
+from django.db import models
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
+
 from .models import (
     CredentialType,
     CredentialRequest,
@@ -40,6 +43,8 @@ from .services import (
 )
 from accounts.models import Role
 from .ml_client import MLClient
+
+User = get_user_model()
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
@@ -181,12 +186,72 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @extend_schema(responses={200: CredentialRequestSerializer})
+    @action(detail=True, methods=['patch', 'post'])
+    def assign(self, request, pk=None):
+        credential_request = self.get_object()
+        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {"detail": "You do not have permission to assign requests."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        target_staff_identifier = (
+            request.data.get('assigned_staff') or
+            request.user.username
+        )
+        staff_user = None
+        if target_staff_identifier:
+            staff_user = User.objects.filter(
+                models.Q(username__iexact=str(target_staff_identifier)) |
+                models.Q(
+                    id=int(target_staff_identifier)
+                    if str(target_staff_identifier).isdigit() else -1
+                )
+            ).first()
+        if not staff_user:
+            staff_user = request.user
+
+        credential_request.assigned_staff = staff_user
+        credential_request.in_process_queue = True
+
+        import re
+        staff_display = staff_user.username or 'Staff'
+        clean_rem = re.sub(
+            r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '',
+            credential_request.remarks or ''
+        ).strip()
+        new_rem = f"{clean_rem} | [Assigned to: {staff_display}]".strip(' |')
+        credential_request.remarks = new_rem
+        credential_request.save()
+
+        from audit.services import AuditService
+        AuditService.log_action(
+            actor=request.user,
+            action='REQUEST_ASSIGNED',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state=None,
+            new_state={
+                'assigned_staff': staff_user.username,
+                'in_process_queue': True,
+                'remarks': credential_request.remarks
+            }
+        )
+
+        return Response(
+            CredentialRequestSerializer(credential_request).data,
+            status=status.HTTP_200_OK
+        )
+
+    @extend_schema(responses={200: CredentialRequestSerializer})
     @action(detail=True, methods=['patch'])
     def transition(self, request, pk=None):
         credential_request = self.get_object()
 
         new_status = request.data.get('status')
         remarks = request.data.get('remarks', '')
+        assigned_staff = request.data.get('assigned_staff')
+        in_process_queue = request.data.get('in_process_queue')
 
         if not new_status:
             return Response(
@@ -198,7 +263,9 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             actor=request.user,
             credential_request=credential_request,
             new_status=new_status,
-            remarks=remarks
+            remarks=remarks,
+            assigned_staff=assigned_staff,
+            in_process_queue=in_process_queue
         )
 
         return Response(CredentialRequestSerializer(updated_request).data)
