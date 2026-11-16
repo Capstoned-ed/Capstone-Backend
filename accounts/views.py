@@ -17,10 +17,52 @@ from .serializers import (
     PasswordResetVerifySerializer,
     PasswordResetConfirmSerializer,
 )
-from .permissions import IsAdminRole
+from .permissions import IsAdminRole, IsStaffOrAdmin
+from .models import Role
 from .services import AccountService, PasswordResetService
 
 User = get_user_model()
+
+
+class CurrentUserView(APIView):
+    """
+    Returns the authenticated user's profile and details.
+    Accessible to any authenticated user (Student, Staff, Registrar, Admin).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: UserSerializer})
+    def get(self, request, *args, **kwargs):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(responses={200: UserSerializer})
+    def patch(self, request, *args, **kwargs):
+        user = request.user
+        for field in ['first_name', 'last_name', 'email']:
+            if field in request.data:
+                setattr(user, field, request.data[field])
+        user.save()
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class StaffDirectoryView(APIView):
+    """
+    Returns active staff, registrar, and admin accounts for staff assignment,
+    workload distribution, and staff directory.
+    Accessible to Staff, Registrar, and Admin.
+    """
+    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
+
+    @extend_schema(responses={200: UserSerializer(many=True)})
+    def get(self, request, *args, **kwargs):
+        qs = User.objects.filter(
+            is_active=True,
+            role__in=[Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+        ).order_by('role', 'last_name', 'first_name')
+        serializer = UserSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

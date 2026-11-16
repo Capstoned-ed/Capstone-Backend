@@ -23,6 +23,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Add custom claims
         token['username'] = user.username
         token['role'] = user.role
+        token['first_name'] = user.first_name
+        token['last_name'] = user.last_name
+        token['full_name'] = f"{user.first_name} {user.last_name}".strip() or user.username
         token['force_password_change'] = user.force_password_change
 
         return token
@@ -36,16 +39,22 @@ class UserSerializer(serializers.ModelSerializer):
     Read-only representation of a User.
     Hides password entirely.
     """
+    full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'role',
-            'first_name', 'last_name',
+            'first_name', 'last_name', 'full_name',
             'course_name', 'course_code',
             'is_active', 'force_password_change',
             'date_joined', 'last_login'
         ]
         read_only_fields = fields
+
+    def get_full_name(self, obj):
+        name = f"{obj.first_name} {obj.last_name}".strip()
+        return name or obj.username
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
