@@ -190,3 +190,32 @@ class TestStaffDirectoryView:
         # Unauthenticated unauthorized
         api_client.force_authenticate(user=None)
         assert api_client.get(url).status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+class TestSeedAdminCommand:
+    def test_seed_admin_fails_without_env_vars(self, monkeypatch):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        monkeypatch.delenv('ADMIN_ID', raising=False)
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        with pytest.raises(CommandError) as exc_info:
+            call_command('seed_admin')
+        assert (
+            "ADMIN_ID and ADMIN_PASSWORD environment variables must be set."
+            in str(exc_info.value)
+        )
+
+    def test_seed_admin_succeeds_with_env_vars(self, monkeypatch):
+        from django.core.management import call_command
+
+        monkeypatch.setenv('ADMIN_ID', '987654')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'SecurePass123!')
+        monkeypatch.setenv('ADMIN_EMAIL', 'custom_admin@ustp.edu.ph')
+        call_command('seed_admin')
+
+        user = User.objects.get(username='987654')
+        assert user.role == Role.ADMIN
+        assert user.email == 'custom_admin@ustp.edu.ph'
+        assert user.check_password('SecurePass123!') is True
