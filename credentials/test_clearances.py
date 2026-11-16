@@ -10,7 +10,9 @@ from audit.models import AuditLog
 from notifications.models import Notification, NotificationEvent
 from credentials.models import (
     ClearanceStatus,
-    CredentialType
+    CredentialType,
+    CredentialRequest,
+    StudentClearance
 )
 from credentials.services import (
     StudentClearanceService,
@@ -416,3 +418,85 @@ class StudentClearanceAPITests(APITestCase):
             remarks="Claimed by student."
         )
         self.assertEqual(final_req.status, RequestStatus.RELEASED)
+
+    def test_staff_cannot_reject_once_payment_verified(self):
+        from credentials.models import RequestStatus
+        from rest_framework.exceptions import PermissionDenied
+
+        cred_type = CredentialType.objects.create(
+            code="CT4", name="Diploma", price=100.0, processing_days=3
+        )
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=cred_type,
+            status=RequestStatus.PAYMENT_VERIFIED
+        )
+
+        # Staff rejection at PAYMENT_VERIFIED fails with PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            CredentialRequestService.transition_request(
+                actor=self.staff,
+                credential_request=req,
+                new_status=RequestStatus.REJECTED,
+                remarks="Staff attempting rejection"
+            )
+
+        # Via API: Staff returns 403 Forbidden
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('credentialrequest-transition', kwargs={'pk': req.id})
+        res = self.client.patch(
+            url, {'status': 'REJECTED', 'remarks': 'Invalid'}, format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_restore_request_admin_only_and_preserves_records(self):
+        from credentials.models import RequestStatus, Payment, PaymentStatus
+        from decimal import Decimal
+
+        cred_type = CredentialType.objects.create(
+            code="CT5", name="Cert", price=100.0, processing_days=3
+        )
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearance.objects.create(
+            user=self.student, status=ClearanceStatus.APPROVED, file=file
+        )
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=cred_type,
+            status=RequestStatus.RELEASED
+        )
+        payment = Payment.objects.create(
+            request=req,
+            amount=Decimal('100.00'),
+            receipt_reference_number='OR-9999',
+            receipt_image=file,
+            status=PaymentStatus.VERIFIED
+        )
+
+        # Staff cannot restore: 403 Forbidden
+        self.client.force_authenticate(user=self.staff)
+        restore_url = reverse('credentialrequest-restore', kwargs={'pk': req.id})
+        res_staff = self.client.post(restore_url, {}, format='json')
+        self.assertEqual(res_staff.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Admin can restore: 200 OK
+        admin = User.objects.create_superuser(
+            username='admin1', email='a1@test.com', password='p'
+        )
+        self.client.force_authenticate(user=admin)
+        res_admin = self.client.post(restore_url, {}, format='json')
+        self.assertEqual(res_admin.status_code, status.HTTP_200_OK)
+
+        req.refresh_from_db()
+        # Restored to READY_FOR_RELEASE because payment is verified
+        self.assertEqual(req.status, RequestStatus.READY_FOR_RELEASE)
+        self.assertTrue(req.in_process_queue)
+
+        # Records are preserved and NOT wiped or reset
+        clearance.refresh_from_db()
+        self.assertEqual(clearance.status, ClearanceStatus.APPROVED)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, PaymentStatus.VERIFIED)
+        self.assertEqual(payment.receipt_reference_number, 'OR-9999')
