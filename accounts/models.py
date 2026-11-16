@@ -57,6 +57,23 @@ class User(AbstractUser):
         default='IT',
         help_text=_('Acronym or short code of enrolled program (e.g., IT).'),
     )
+    birth_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=_('Student date of birth.'),
+    )
+    contact_number = models.CharField(
+        max_length=30,
+        blank=True,
+        default='',
+        help_text=_('Active contact or mobile number.'),
+    )
+    year_level = models.CharField(
+        max_length=30,
+        blank=True,
+        default='1st year',
+        help_text=_('Academic year level (e.g., 1st year, Alumnus).'),
+    )
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"

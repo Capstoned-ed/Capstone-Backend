@@ -48,6 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'role',
             'first_name', 'last_name', 'full_name',
             'course_name', 'course_code',
+            'birth_date', 'contact_number', 'year_level',
             'is_active', 'force_password_change',
             'date_joined', 'last_login'
         ]
@@ -76,12 +77,18 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = [
             'username', 'email', 'password', 'role',
             'first_name', 'last_name',
-            'course_name', 'course_code'
+            'course_name', 'course_code',
+            'birth_date', 'contact_number', 'year_level',
         ]
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
             'course_name': {'required': False},
-            'course_code': {'required': False}
+            'course_code': {'required': False},
+            'birth_date': {'required': False, 'allow_null': True},
+            'contact_number': {'required': False},
+            'year_level': {'required': False},
         }
 
     def validate_role(self, value):
@@ -107,11 +114,31 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'email', 'role', 'first_name', 'last_name',
-            'course_name', 'course_code', 'is_active'
+            'course_name', 'course_code',
+            'birth_date', 'contact_number', 'year_level',
+            'is_active',
         ]
         extra_kwargs = {
             'course_name': {'required': False},
-            'course_code': {'required': False}
+            'course_code': {'required': False},
+            'birth_date': {'required': False, 'allow_null': True},
+            'contact_number': {'required': False},
+            'year_level': {'required': False},
+        }
+
+
+class SelfProfileUpdateSerializer(serializers.ModelSerializer):
+    """
+    Allows an authenticated user to update their own contact & profile info.
+    """
+    class Meta:
+        model = User
+        fields = ['email', 'birth_date', 'contact_number', 'year_level']
+        extra_kwargs = {
+            'email': {'required': False},
+            'birth_date': {'required': False, 'allow_null': True},
+            'contact_number': {'required': False},
+            'year_level': {'required': False},
         }
 
 
