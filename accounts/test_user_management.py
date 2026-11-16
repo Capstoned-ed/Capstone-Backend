@@ -219,3 +219,38 @@ class TestSeedAdminCommand:
         assert user.role == Role.ADMIN
         assert user.email == 'custom_admin@ustp.edu.ph'
         assert user.check_password('SecurePass123!') is True
+
+    def test_seed_admin_clean_flag_wipes_non_admin_users(self, monkeypatch):
+        from django.core.management import call_command
+
+        User.objects.create_user(username='wipe_me1', password='p', role=Role.STUDENT)
+        monkeypatch.setenv('ADMIN_ID', 'admin_clean_test')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'SecureAdminPass1')
+        call_command('seed_admin', clean=True)
+
+        assert not User.objects.filter(username='wipe_me1').exists()
+        assert User.objects.filter(username='admin_clean_test').exists()
+
+    def test_seed_admin_clean_seed_env_var_true_wipes_data(self, monkeypatch):
+        from django.core.management import call_command
+
+        User.objects.create_user(username='wipe_me2', password='p', role=Role.STUDENT)
+        monkeypatch.setenv('ADMIN_ID', 'admin_clean_test2')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'SecureAdminPass2')
+        monkeypatch.setenv('CLEAN_SEED', 'true')
+        call_command('seed_admin')
+
+        assert not User.objects.filter(username='wipe_me2').exists()
+        assert User.objects.filter(username='admin_clean_test2').exists()
+
+    def test_seed_admin_clean_seed_false_preserves_data(self, monkeypatch):
+        from django.core.management import call_command
+
+        User.objects.create_user(username='keep_me', password='p', role=Role.STUDENT)
+        monkeypatch.setenv('ADMIN_ID', 'admin_preserve_test')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'SecureAdminPass3')
+        monkeypatch.setenv('CLEAN_SEED', 'false')
+        call_command('seed_admin')
+
+        assert User.objects.filter(username='keep_me').exists()
+        assert User.objects.filter(username='admin_preserve_test').exists()

@@ -63,7 +63,10 @@ class Command(BaseCommand):
 
         if not email:
             email = f'{username}@ustp.edu.ph'
-        clean = options['clean']
+        clean = (
+            options['clean'] or
+            os.environ.get('CLEAN_SEED', '').strip().lower() in ('true', '1')
+        )
 
         if clean:
             self.stdout.write(self.style.WARNING(

@@ -12,7 +12,11 @@ echo "==> Applying database migrations..."
 python manage.py migrate --no-input
 
 echo "==> Seeding default admin account..."
-python manage.py seed_admin
+if [ "$CLEAN_SEED" = "true" ]; then
+  python manage.py seed_admin --clean
+else
+  python manage.py seed_admin
+fi
 
 echo "==> Build complete!"
 
