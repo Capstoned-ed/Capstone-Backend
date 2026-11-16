@@ -1,5 +1,4 @@
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
 from django.db import transaction, models
 from audit.services import AuditService
 from notifications.services import NotificationService
@@ -103,39 +102,23 @@ class CredentialTypeService:
 
 
 class CredentialRequestService:
-    STAFF_ADMIN_ROLES = [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
-
     TRANSITION_MATRIX = {
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.PROCESSING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.RELEASED,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.PROCESSING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES}
+                'roles': [Role.STAFF, Role.ADMIN]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -143,39 +126,38 @@ class CredentialRequestService:
         ],
         RequestStatus.PAYMENT_PENDING: [
             {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.PROCESSING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': STAFF_ADMIN_ROLES},
+                'roles': [Role.STAFF, Role.ADMIN]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
             {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES}
+                'roles': [Role.STAFF, Role.ADMIN]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
-            {'status': RequestStatus.PROCESSING,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.RELEASED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES}
+            {'status': RequestStatus.PROCESSING, 'roles': [
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+            ]}
         ],
         RequestStatus.PROCESSING: [
-            {'status': RequestStatus.READY_FOR_RELEASE,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.RELEASED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES}
+            {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
-            {'status': RequestStatus.RELEASED,
-                'roles': STAFF_ADMIN_ROLES},
-            {'status': RequestStatus.REJECTED,
-                'roles': STAFF_ADMIN_ROLES}
-        ]
+            {'status': RequestStatus.RELEASED, 'roles': [
+                Role.REGISTRAR, Role.ADMIN, Role.STAFF
+            ]},
+            {'status': RequestStatus.REJECTED, 'roles': [
+                Role.REGISTRAR, Role.ADMIN
+            ]}
+        ],
+        RequestStatus.RELEASED: [],
+        RequestStatus.REJECTED: [],
+        RequestStatus.CANCELLED: []
     }
 
     @staticmethod
@@ -189,15 +171,8 @@ class CredentialRequestService:
         )
 
         if not clearance:
-            # Auto-provision a provisional clearance for the student
-            clearance = StudentClearance.objects.create(
-                user=actor,
-                status=ClearanceStatus.PENDING,
-                remarks="Auto-generated provisional clearance for request creation.",
-                file=ContentFile(
-                    b"%PDF-1.4\n%provisional",
-                    name=f"clearance_{actor.username}.pdf"
-                )
+            raise ValidationError(
+                "You must submit a clearance document before creating a request."
             )
 
         if clearance.status == ClearanceStatus.REJECTED:
