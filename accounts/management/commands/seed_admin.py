@@ -1,5 +1,5 @@
 import os
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth import get_user_model
 from accounts.models import Role
 from credentials.models import CredentialType
@@ -23,29 +23,46 @@ class Command(BaseCommand):
             '--id',
             '--username',
             dest='username',
-            default=os.environ.get('ADMIN_ID', os.environ.get('E2E_ADMIN_ID', '24689')),
-            help='Admin ID Number / Username (default: 24689)',
+            default=None,
+            help='Admin ID Number / Username (defaults to ADMIN_ID env var)',
         )
         parser.add_argument(
             '--password',
             dest='password',
-            default=os.environ.get(
-                'ADMIN_PASSWORD',
-                os.environ.get('E2E_ADMIN_PASSWORD', '24689')
-            ),
-            help='Admin password (default: 24689)',
+            default=None,
+            help='Admin password (defaults to ADMIN_PASSWORD env var)',
         )
         parser.add_argument(
             '--email',
             dest='email',
-            default=os.environ.get('ADMIN_EMAIL', 'admin@ustp.edu.ph'),
-            help='Admin email (default: admin@ustp.edu.ph)',
+            default=None,
+            help='Admin email (defaults to ADMIN_EMAIL env var)',
         )
 
     def handle(self, *args, **options):
-        username = str(options['username']).strip()
-        password = str(options['password']).strip()
-        email = str(options['email']).strip()
+        username = (
+            options.get('username') or
+            os.environ.get('ADMIN_ID') or
+            ''
+        ).strip()
+        password = (
+            options.get('password') or
+            os.environ.get('ADMIN_PASSWORD') or
+            ''
+        ).strip()
+        email = (
+            options.get('email') or
+            os.environ.get('ADMIN_EMAIL') or
+            ''
+        ).strip()
+
+        if not username or not password:
+            raise CommandError(
+                "ADMIN_ID and ADMIN_PASSWORD environment variables must be set."
+            )
+
+        if not email:
+            email = f'{username}@ustp.edu.ph'
         clean = options['clean']
 
         if clean:
@@ -160,7 +177,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('REGQUEST CLEAN ADMIN SEED COMPLETE'))
         self.stdout.write(self.style.SUCCESS('=' * 60))
         self.stdout.write(f'Admin ID / Username : {username}')
-        self.stdout.write(f'Admin Password      : {password}')
+        self.stdout.write(f'Admin Password      : {"*" * len(password)}')
         self.stdout.write(f'Admin Email         : {email}')
         self.stdout.write(f'Admin Role          : {admin_user.role}')
         self.stdout.write(f'Credential Types    : {seeded_types} in-scope types ready')

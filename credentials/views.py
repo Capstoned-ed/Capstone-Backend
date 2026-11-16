@@ -120,7 +120,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = CredentialRequest.objects.select_related(
-            'user', 'credential_type'
+            'user', 'credential_type', 'assigned_staff'
         ).prefetch_related(
             'payments',
             'documents'
@@ -130,7 +130,52 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         if status_param:
             qs = qs.filter(status=status_param)
 
+        assigned_param = (
+            self.request.query_params.get('assigned_to') or
+            self.request.query_params.get('assigned_staff')
+        )
+        assigned_only = self.request.query_params.get('assigned_only')
+
         user = self.request.user
+
+        if assigned_param:
+            raw_target = str(assigned_param).strip()
+            if raw_target.lower() == 'me' and user.is_authenticated:
+                target_user = user
+            else:
+                target_user = User.objects.filter(
+                    models.Q(username__iexact=raw_target) |
+                    models.Q(
+                        id=int(raw_target) if raw_target.isdigit() else -1
+                    )
+                ).first()
+                if not target_user and ' ' in raw_target:
+                    parts = raw_target.split(None, 1)
+                    target_user = User.objects.filter(
+                        first_name__iexact=parts[0],
+                        last_name__iexact=parts[1]
+                    ).first()
+                if not target_user:
+                    target_user = User.objects.filter(
+                        models.Q(first_name__iexact=raw_target) |
+                        models.Q(last_name__iexact=raw_target) |
+                        models.Q(email__iexact=raw_target)
+                    ).first()
+
+            if target_user:
+                qs = qs.filter(
+                    models.Q(assigned_staff=target_user) |
+                    models.Q(
+                        remarks__icontains=f"Assigned to: {target_user.username}"
+                    )
+                )
+            else:
+                qs = qs.none()
+        elif assigned_only == 'true' and user.is_authenticated:
+            qs = qs.filter(
+                models.Q(assigned_staff=user) |
+                models.Q(remarks__icontains=f"Assigned to: {user.username}")
+            )
 
         if user.is_authenticated and user.role == Role.STUDENT:
             return qs.filter(user=user)
@@ -201,13 +246,25 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         )
         staff_user = None
         if target_staff_identifier:
+            raw_target = str(target_staff_identifier).strip()
             staff_user = User.objects.filter(
-                models.Q(username__iexact=str(target_staff_identifier)) |
+                models.Q(username__iexact=raw_target) |
                 models.Q(
-                    id=int(target_staff_identifier)
-                    if str(target_staff_identifier).isdigit() else -1
+                    id=int(raw_target) if raw_target.isdigit() else -1
                 )
             ).first()
+            if not staff_user and ' ' in raw_target:
+                parts = raw_target.split(None, 1)
+                staff_user = User.objects.filter(
+                    first_name__iexact=parts[0],
+                    last_name__iexact=parts[1]
+                ).first()
+            if not staff_user:
+                staff_user = User.objects.filter(
+                    models.Q(first_name__iexact=raw_target) |
+                    models.Q(last_name__iexact=raw_target) |
+                    models.Q(email__iexact=raw_target)
+                ).first()
         if not staff_user:
             staff_user = request.user
 
