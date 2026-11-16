@@ -115,3 +115,78 @@ class TestUserViewSet:
         # Record should still exist in DB but be inactive
         student_user.refresh_from_db()
         assert student_user.is_active is False
+
+
+@pytest.mark.django_db
+class TestCurrentUserView:
+    def test_current_user_profile(self, api_client, student_user):
+        student_user.first_name = "Jane"
+        student_user.last_name = "Doe"
+        student_user.save()
+
+        api_client.force_authenticate(user=student_user)
+        url = reverse('current-user')
+        response = api_client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['username'] == 'student1'
+        assert response.data['full_name'] == 'Jane Doe'
+
+    def test_current_user_patch(self, api_client, student_user):
+        api_client.force_authenticate(user=student_user)
+        url = reverse('current-user')
+        response = api_client.patch(url, {'first_name': 'UpdatedFirst'}, format='json')
+        assert response.status_code == status.HTTP_200_OK
+        student_user.refresh_from_db()
+        assert student_user.first_name == 'UpdatedFirst'
+
+    def test_unauthenticated_cannot_access_me(self, api_client):
+        url = reverse('current-user')
+        response = api_client.get(url)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+class TestStaffDirectoryView:
+    def test_staff_and_registrar_can_access_directory(self, api_client):
+        staff = User.objects.create_user(
+            username='staff_dir1', password='p', role=Role.STAFF
+        )
+        registrar = User.objects.create_user(
+            username='reg_dir1', password='p', role=Role.REGISTRAR
+        )
+        admin = User.objects.create_user(
+            username='admin_dir1', password='p', role=Role.ADMIN
+        )
+        student = User.objects.create_user(
+            username='stud_dir1', password='p', role=Role.STUDENT
+        )
+
+        url = reverse('staff-directory')
+
+        # Staff access
+        api_client.force_authenticate(user=staff)
+        res = api_client.get(url)
+        assert res.status_code == status.HTTP_200_OK
+        usernames = [u['username'] for u in res.data]
+        assert 'staff_dir1' in usernames
+        assert 'reg_dir1' in usernames
+        assert 'admin_dir1' in usernames
+        assert 'stud_dir1' not in usernames
+
+        # Registrar access
+        api_client.force_authenticate(user=registrar)
+        res = api_client.get(url)
+        assert res.status_code == status.HTTP_200_OK
+
+        # Admin access
+        api_client.force_authenticate(user=admin)
+        res = api_client.get(url)
+        assert res.status_code == status.HTTP_200_OK
+
+        # Student forbidden
+        api_client.force_authenticate(user=student)
+        assert api_client.get(url).status_code == status.HTTP_403_FORBIDDEN
+
+        # Unauthenticated unauthorized
+        api_client.force_authenticate(user=None)
+        assert api_client.get(url).status_code == status.HTTP_401_UNAUTHORIZED

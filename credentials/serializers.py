@@ -94,18 +94,88 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     custom_doc_code = serializers.CharField(
         max_length=20, required=False, write_only=True
     )
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.SerializerMethodField()
+    student_email = serializers.SerializerMethodField()
+    credential_name = serializers.SerializerMethodField()
+    credential_code = serializers.SerializerMethodField()
+    assigned_staff = serializers.SerializerMethodField()
 
     class Meta:
         model = CredentialRequest
         fields = [
             'id', 'user', 'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
-            'documents', 'payments', 'custom_doc_code'
+            'documents', 'payments', 'custom_doc_code',
+            'student_name', 'student_id', 'student_email',
+            'credential_name', 'credential_code', 'assigned_staff'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
-            'documents', 'payments'
+            'documents', 'payments', 'student_name', 'student_id',
+            'student_email', 'credential_name', 'credential_code', 'assigned_staff'
         ]
+
+    def get_student_name(self, obj):
+        user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
+        if not user:
+            return 'Student'
+        first = getattr(user, 'first_name', '')
+        last = getattr(user, 'last_name', '')
+        name = f"{first} {last}".strip()
+        return name or getattr(user, 'username', '') or 'Student'
+
+    def get_student_id(self, obj):
+        user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
+        if not user:
+            return ''
+        return getattr(user, 'username', '') or ''
+
+    def get_student_email(self, obj):
+        user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
+        if not user:
+            return ''
+        return getattr(user, 'email', '') or ''
+
+    def get_credential_name(self, obj):
+        ct = (
+            obj.get('credential_type')
+            if isinstance(obj, dict)
+            else getattr(obj, 'credential_type', None)
+        )
+        if ct:
+            return getattr(ct, 'name', '')
+        return ''
+
+    def get_credential_code(self, obj):
+        ct = (
+            obj.get('credential_type')
+            if isinstance(obj, dict)
+            else getattr(obj, 'credential_type', None)
+        )
+        if ct:
+            return getattr(ct, 'code', '')
+        return ''
+
+    def get_assigned_staff(self, obj):
+        remarks = (
+            obj.get('remarks')
+            if isinstance(obj, dict)
+            else getattr(obj, 'remarks', '')
+        )
+        remarks = remarks or ''
+        import re
+        match = re.search(
+            r'\[Assigned(?:\s+to)?:\s*([^\]]+)\]', remarks, re.IGNORECASE
+        )
+        if match:
+            return match.group(1).strip()
+        match2 = re.search(
+            r'Assigned(?:\s+to)?:\s*([^|\n\r;]+)', remarks, re.IGNORECASE
+        )
+        if match2:
+            return match2.group(1).strip()
+        return ''
 
     def validate_credential_type(self, value):
         if not value.is_active:

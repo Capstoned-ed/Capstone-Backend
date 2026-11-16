@@ -6,6 +6,7 @@ from accounts.permissions import (
     IsStaffRole,
     IsRegistrar,
     IsAdminRole,
+    IsStaffOrAdmin,
 )
 
 
@@ -47,6 +48,15 @@ def test_is_admin_role_permission(mock_request):
 
     mock_request.user.role = Role.STUDENT
     assert IsAdminRole().has_permission(mock_request, None) is False
+
+
+def test_is_staff_or_admin_permission(mock_request):
+    for role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+        mock_request.user.role = role
+        assert IsStaffOrAdmin().has_permission(mock_request, None) is True
+
+    mock_request.user.role = Role.STUDENT
+    assert IsStaffOrAdmin().has_permission(mock_request, None) is False
 
 
 def test_permissions_unauthenticated(mock_request):

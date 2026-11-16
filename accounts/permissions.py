@@ -40,3 +40,13 @@ class IsAdminRole(BasePermission):
             request.user.is_authenticated and
             request.user.role == Role.ADMIN
         )
+
+
+class IsStaffOrAdmin(BasePermission):
+    """Allows access to staff, registrar, or admin users."""
+    def has_permission(self, request, view):
+        return bool(
+            request.user and
+            request.user.is_authenticated and
+            request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+        )
