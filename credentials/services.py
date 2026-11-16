@@ -141,10 +141,10 @@ class CredentialRequestService:
         ],
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
             ]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
@@ -152,7 +152,7 @@ class CredentialRequestService:
                 Role.REGISTRAR, Role.ADMIN, Role.STAFF
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
             ]}
         ],
         RequestStatus.RELEASED: [],
@@ -438,13 +438,29 @@ class StudentClearanceService:
     @staticmethod
     @transaction.atomic
     def review_clearance(actor, clearance, status, remarks=""):
-        if status not in [ClearanceStatus.APPROVED, ClearanceStatus.REJECTED]:
+        norm_status = str(status).strip().upper() if status else ''
+        if norm_status in ['VERIFIED', 'APPROVED', ClearanceStatus.APPROVED]:
+            canonical_status = ClearanceStatus.APPROVED
+        elif norm_status in ['REJECTED', 'NOT_VERIFIED', ClearanceStatus.REJECTED]:
+            canonical_status = ClearanceStatus.REJECTED
+        elif norm_status in ['PENDING', 'RESET', ClearanceStatus.PENDING]:
+            canonical_status = ClearanceStatus.PENDING
+        else:
             raise ValidationError("Invalid clearance status.")
+
+        # Idempotent review: If status is already canonical_status, succeed
+        if clearance.status == canonical_status:
+            clearance.reviewed_by = actor
+            clearance.reviewed_at = timezone.now()
+            if remarks:
+                clearance.remarks = remarks
+            clearance.save()
+            return clearance
 
         if clearance.status != ClearanceStatus.PENDING:
             raise ValidationError("Only PENDING clearances can be reviewed.")
 
-        if status == ClearanceStatus.REJECTED and not remarks:
+        if canonical_status == ClearanceStatus.REJECTED and not remarks:
             raise ValidationError("Remarks are required when rejecting a clearance.")
 
         previous_state = {
@@ -452,7 +468,7 @@ class StudentClearanceService:
             'remarks': clearance.remarks
         }
 
-        clearance.status = status
+        clearance.status = canonical_status
         clearance.remarks = remarks
         clearance.reviewed_by = actor
         clearance.reviewed_at = timezone.now()
@@ -465,8 +481,9 @@ class StudentClearanceService:
         }
 
         audit_action = (
-            'CLEARANCE_APPROVED' if status == ClearanceStatus.APPROVED
-            else 'CLEARANCE_REJECTED'
+            'CLEARANCE_APPROVED' if canonical_status == ClearanceStatus.APPROVED
+            else 'CLEARANCE_REJECTED' if canonical_status == ClearanceStatus.REJECTED
+            else 'CLEARANCE_RESET'
         )
 
         AuditService.log_action(
@@ -478,20 +495,21 @@ class StudentClearanceService:
             new_state=new_state
         )
 
-        notification_event = (
-            NotificationEvent.CLEARANCE_APPROVED
-            if status == ClearanceStatus.APPROVED
-            else NotificationEvent.CLEARANCE_REJECTED
-        )
-        msg = f"Your student clearance has been {status.lower()}."
+        if canonical_status in [ClearanceStatus.APPROVED, ClearanceStatus.REJECTED]:
+            notification_event = (
+                NotificationEvent.CLEARANCE_APPROVED
+                if canonical_status == ClearanceStatus.APPROVED
+                else NotificationEvent.CLEARANCE_REJECTED
+            )
+            msg = f"Your student clearance has been {canonical_status.lower()}."
 
-        NotificationService.create_notification(
-            recipient=clearance.user,
-            event_type=notification_event,
-            message=msg,
-            related_object_type='StudentClearance',
-            related_object_id=str(clearance.id)
-        )
+            NotificationService.create_notification(
+                recipient=clearance.user,
+                event_type=notification_event,
+                message=msg,
+                related_object_type='StudentClearance',
+                related_object_id=str(clearance.id)
+            )
 
         return clearance
 
