@@ -207,6 +207,30 @@ class CredentialRequestService:
             .get(pk=credential_request.pk)
         )
         current_status = credential_request.status
+
+        # Allow Staff/Registrar/Admin to update remarks without changing status
+        if new_status == current_status:
+            if actor.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+                raise PermissionDenied(
+                    "You do not have permission to update request remarks."
+                )
+            if remarks is not None:
+                previous_remarks = credential_request.remarks
+                credential_request.remarks = remarks
+                credential_request.save()
+                AuditService.log_action(
+                    actor=actor,
+                    action='REQUEST_REMARKS_UPDATED',
+                    object_type='CredentialRequest',
+                    object_id=credential_request.id,
+                    previous_state={
+                        'status': current_status,
+                        'remarks': previous_remarks
+                    },
+                    new_state={'status': current_status, 'remarks': remarks}
+                )
+            return credential_request
+
         allowed_transitions = CredentialRequestService.TRANSITION_MATRIX.get(
             current_status, [])
 

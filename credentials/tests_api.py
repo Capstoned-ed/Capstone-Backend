@@ -132,6 +132,24 @@ class CredentialRequestAPITests(APITestCase):
         self.req1.refresh_from_db()
         self.assertEqual(self.req1.status, 'REQUIREMENTS_VERIFICATION')
 
+    def test_staff_can_update_remarks_same_status(self):
+        """Staff can update remarks and assign staff while keeping current status."""
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        response = self.client.patch(
+            url,
+            {
+                'status': 'PENDING',
+                'remarks': '[Assigned to: staff_user] Processing notes'
+            },
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PENDING')
+        self.assertIn('[Assigned to: staff_user]', self.req1.remarks)
+        self.assertEqual(response.data['assigned_staff'], 'staff_user')
+
     def test_transition_endpoint_student_cancel(self):
         """Student can cancel their own PENDING request."""
         self.client.force_authenticate(user=self.student1)
