@@ -333,6 +333,33 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             ).data
         )
 
+    @extend_schema(responses={200: CredentialRequestSerializer})
+    @action(
+        detail=True, methods=['post', 'patch'],
+        permission_classes=[IsAuthenticated]
+    )
+    def restore(self, request, pk=None):
+        credential_request = self.get_object()
+        remarks = request.data.get('remarks', '')
+        updated_request = CredentialRequestService.restore_request(
+            actor=request.user,
+            credential_request=credential_request,
+            remarks=remarks
+        )
+        return Response(
+            CredentialRequestSerializer(
+                updated_request, context={'request': request}
+            ).data
+        )
+
+    @extend_schema(responses={200: CredentialRequestSerializer})
+    @action(
+        detail=True, methods=['post', 'patch'],
+        permission_classes=[IsAuthenticated]
+    )
+    def reopen(self, request, pk=None):
+        return self.restore(request, pk=pk)
+
 
 class RequirementDocumentViewSet(viewsets.ModelViewSet):
     """

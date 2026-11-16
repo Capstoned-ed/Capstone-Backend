@@ -136,7 +136,7 @@ class CredentialRequestService:
                 Role.REGISTRAR, Role.STAFF, Role.ADMIN
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.ADMIN
             ]}
         ],
         RequestStatus.PROCESSING: [
@@ -256,6 +256,13 @@ class CredentialRequestService:
         clean_key = str(new_status).strip().upper().replace('-', '_')
         canonical_status = status_map.get(clean_key, clean_key)
 
+        if clean_key in ['RESTORE', 'REOPEN']:
+            return CredentialRequestService.restore_request(
+                actor=actor,
+                credential_request=credential_request,
+                remarks=remarks
+            )
+
         # Handle staff assignment if provided
         if assigned_staff is not None:
             if isinstance(assigned_staff, User):
@@ -370,6 +377,79 @@ class CredentialRequestService:
                 related_object_type='CredentialRequest',
                 related_object_id=str(credential_request.id)
             )
+
+        return credential_request
+
+    @staticmethod
+    @transaction.atomic
+    def restore_request(actor, credential_request, remarks=""):
+        credential_request = (
+            CredentialRequest.objects
+            .select_for_update()
+            .get(pk=credential_request.pk)
+        )
+
+        if actor.role != Role.ADMIN:
+            raise PermissionDenied(
+                "Only administrators can reopen or restore requests."
+            )
+
+        # Preserve verified clearance and payment steps without wiping records
+        has_verified_payment = Payment.objects.filter(
+            request=credential_request,
+            status=PaymentStatus.VERIFIED
+        ).exists()
+
+        has_verified_clearance = StudentClearance.objects.filter(
+            user=credential_request.user,
+            status=ClearanceStatus.APPROVED
+        ).exists()
+
+        if has_verified_payment:
+            target_status = RequestStatus.READY_FOR_RELEASE
+        elif has_verified_clearance:
+            target_status = RequestStatus.PAYMENT_PENDING
+        else:
+            target_status = RequestStatus.PENDING
+
+        previous_state = {
+            'status': credential_request.status,
+            'remarks': credential_request.remarks,
+        }
+
+        credential_request.status = target_status
+        credential_request.in_process_queue = True
+        if remarks:
+            credential_request.remarks = remarks
+        else:
+            credential_request.remarks = (
+                f"Request restored to {target_status} by Admin {actor.username}."
+            )
+        credential_request.save()
+
+        AuditService.log_action(
+            actor=actor,
+            action=f'REQUEST_RESTORED_{target_status}',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state=previous_state,
+            new_state={
+                'status': credential_request.status,
+                'remarks': credential_request.remarks,
+                'in_process_queue': credential_request.in_process_queue,
+            }
+        )
+
+        NotificationService.create_notification(
+            recipient=credential_request.user,
+            event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+            message=(
+                f"Your request ({credential_request.tracking_number}) "
+                f"status changed to {target_status}."
+            ),
+            related_object_type='CredentialRequest',
+            related_object_id=str(credential_request.id)
+        )
 
         return credential_request
 
