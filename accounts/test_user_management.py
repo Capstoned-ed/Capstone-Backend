@@ -148,10 +148,18 @@ class TestCurrentUserView:
 @pytest.mark.django_db
 class TestStaffDirectoryView:
     def test_staff_and_registrar_can_access_directory(self, api_client):
-        staff = User.objects.create_user(username='staff_dir1', password='p', role=Role.STAFF)
-        registrar = User.objects.create_user(username='reg_dir1', password='p', role=Role.REGISTRAR)
-        admin = User.objects.create_user(username='admin_dir1', password='p', role=Role.ADMIN)
-        student = User.objects.create_user(username='stud_dir1', password='p', role=Role.STUDENT)
+        staff = User.objects.create_user(
+            username='staff_dir1', password='p', role=Role.STAFF
+        )
+        registrar = User.objects.create_user(
+            username='reg_dir1', password='p', role=Role.REGISTRAR
+        )
+        admin = User.objects.create_user(
+            username='admin_dir1', password='p', role=Role.ADMIN
+        )
+        student = User.objects.create_user(
+            username='stud_dir1', password='p', role=Role.STUDENT
+        )
 
         url = reverse('staff-directory')
 
@@ -177,11 +185,8 @@ class TestStaffDirectoryView:
 
         # Student forbidden
         api_client.force_authenticate(user=student)
-        res = api_client.get(url)
-        assert res.status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.get(url).status_code == status.HTTP_403_FORBIDDEN
 
         # Unauthenticated unauthorized
         api_client.force_authenticate(user=None)
-        res = api_client.get(url)
-        assert res.status_code == status.HTTP_401_UNAUTHORIZED
-
+        assert api_client.get(url).status_code == status.HTTP_401_UNAUTHORIZED

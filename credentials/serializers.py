@@ -120,7 +120,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
         if not user:
             return 'Student'
-        name = f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+        first = getattr(user, 'first_name', '')
+        last = getattr(user, 'last_name', '')
+        name = f"{first} {last}".strip()
         return name or getattr(user, 'username', '') or 'Student'
 
     def get_student_id(self, obj):
@@ -136,25 +138,41 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         return getattr(user, 'email', '') or ''
 
     def get_credential_name(self, obj):
-        ct = obj.get('credential_type') if isinstance(obj, dict) else getattr(obj, 'credential_type', None)
+        ct = (
+            obj.get('credential_type')
+            if isinstance(obj, dict)
+            else getattr(obj, 'credential_type', None)
+        )
         if ct:
             return getattr(ct, 'name', '')
         return ''
 
     def get_credential_code(self, obj):
-        ct = obj.get('credential_type') if isinstance(obj, dict) else getattr(obj, 'credential_type', None)
+        ct = (
+            obj.get('credential_type')
+            if isinstance(obj, dict)
+            else getattr(obj, 'credential_type', None)
+        )
         if ct:
             return getattr(ct, 'code', '')
         return ''
 
     def get_assigned_staff(self, obj):
-        remarks = obj.get('remarks') if isinstance(obj, dict) else getattr(obj, 'remarks', '')
+        remarks = (
+            obj.get('remarks')
+            if isinstance(obj, dict)
+            else getattr(obj, 'remarks', '')
+        )
         remarks = remarks or ''
         import re
-        match = re.search(r'\[Assigned(?:\s+to)?:\s*([^\]]+)\]', remarks, re.IGNORECASE)
+        match = re.search(
+            r'\[Assigned(?:\s+to)?:\s*([^\]]+)\]', remarks, re.IGNORECASE
+        )
         if match:
             return match.group(1).strip()
-        match2 = re.search(r'Assigned(?:\s+to)?:\s*([^|\n\r;]+)', remarks, re.IGNORECASE)
+        match2 = re.search(
+            r'Assigned(?:\s+to)?:\s*([^|\n\r;]+)', remarks, re.IGNORECASE
+        )
         if match2:
             return match2.group(1).strip()
         return ''

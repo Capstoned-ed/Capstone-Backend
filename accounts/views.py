@@ -64,7 +64,6 @@ class StaffDirectoryView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Takes a set of user credentials and returns an access and refresh JSON web

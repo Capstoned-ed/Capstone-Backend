@@ -50,4 +50,3 @@ class IsStaffOrAdmin(BasePermission):
             request.user.is_authenticated and
             request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
         )
-

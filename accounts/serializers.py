@@ -25,7 +25,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['role'] = user.role
         token['first_name'] = user.first_name
         token['last_name'] = user.last_name
-        token['full_name'] = f"{user.first_name} {user.last_name}".strip() or user.username
+        full_name = f"{user.first_name} {user.last_name}".strip()
+        token['full_name'] = full_name or user.username
         token['force_password_change'] = user.force_password_change
 
         return token

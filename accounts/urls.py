@@ -7,6 +7,10 @@ router.register(r'users', UserViewSet, basename='user')
 
 urlpatterns = [
     path('users/me/', CurrentUserView.as_view(), name='current-user'),
-    path('users/staff-directory/', StaffDirectoryView.as_view(), name='staff-directory'),
+    path(
+        'users/staff-directory/',
+        StaffDirectoryView.as_view(),
+        name='staff-directory'
+    ),
     path('', include(router.urls)),
 ]
