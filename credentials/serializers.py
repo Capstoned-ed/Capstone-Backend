@@ -8,6 +8,7 @@ from .models import (
     RequirementDocument,
     StudentClearance,
     Payment,
+    PaymentStatus,
     RequestStatus,
     ClearanceStatus
 )
@@ -470,5 +471,23 @@ class PaymentSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+
+        receipt_ref = data.get('receipt_reference_number')
+        if receipt_ref and str(receipt_ref).strip():
+            ref_clean = str(receipt_ref).strip()
+            existing_payment = Payment.objects.filter(
+                receipt_reference_number__iexact=ref_clean
+            ).exclude(status=PaymentStatus.REJECTED)
+            if self.instance:
+                existing_payment = existing_payment.exclude(pk=self.instance.pk)
+            if existing_payment.exists():
+                raise serializers.ValidationError(
+                    {
+                        'receipt_reference_number': (
+                            f"Receipt / O.R. reference number '{ref_clean}' has "
+                            "already been used for another payment."
+                        )
+                    }
+                )
 
         return data

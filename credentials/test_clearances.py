@@ -500,3 +500,58 @@ class StudentClearanceAPITests(APITestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.status, PaymentStatus.VERIFIED)
         self.assertEqual(payment.receipt_reference_number, 'OR-9999')
+
+    def test_payment_duplicate_or_and_validation(self):
+        from credentials.models import Payment, PaymentStatus, RequestStatus
+        from credentials.serializers import PaymentSerializer
+        from credentials.services import PaymentService
+        cred_type = CredentialType.objects.create(
+            code="CT_PAY", name="Cert", price=100.0, processing_days=1
+        )
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearanceService.submit_clearance(self.student, file)
+        req1 = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': cred_type, 'remarks': ''}
+        )
+        req2 = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={'credential_type': cred_type, 'remarks': ''}
+        )
+        req2.status = RequestStatus.PAYMENT_PENDING
+        req2.save()
+        receipt1 = SimpleUploadedFile(
+            "r1.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        Payment.objects.create(
+            request=req1,
+            amount=100.0,
+            receipt_reference_number='OR-UNIQUE-123',
+            receipt_image=receipt1,
+            status=PaymentStatus.PENDING
+        )
+
+        # Duplicate O.R. number in PaymentSerializer should fail
+        receipt2 = SimpleUploadedFile(
+            "r2.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        serializer = PaymentSerializer(data={
+            'request': req2.id,
+            'amount': '100.00',
+            'receipt_image': receipt2,
+            'receipt_reference_number': 'or-unique-123'
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('receipt_reference_number', serializer.errors)
+
+        # Service layer duplicate check also raises ValidationError
+        with self.assertRaises(ValidationError):
+            PaymentService.submit_payment(
+                actor=self.student,
+                request=req2,
+                amount=100.0,
+                receipt_image=receipt2,
+                receipt_reference_number='OR-UNIQUE-123'
+            )
