@@ -419,6 +419,14 @@ class CredentialRequestService:
         if remarks is not None:
             credential_request.remarks = remarks
 
+        # Persist Staff processor in DB if request was unassigned
+        if (
+            credential_request.assigned_staff is None
+            and actor.role == Role.STAFF
+        ):
+            credential_request.assigned_staff = actor
+            credential_request.in_process_queue = True
+
         if canonical_status in [
             RequestStatus.RELEASED,
             RequestStatus.REJECTED,
