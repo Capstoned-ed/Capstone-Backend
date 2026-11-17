@@ -170,9 +170,18 @@ class CredentialRequestService:
         clearance = (
             StudentClearance.objects
             .select_for_update()
-            .filter(user=actor)
+            .filter(user=actor, credential_request__isnull=True)
+            .order_by('-uploaded_at')
             .first()
         )
+        if not clearance:
+            clearance = (
+                StudentClearance.objects
+                .select_for_update()
+                .filter(user=actor)
+                .order_by('-uploaded_at')
+                .first()
+            )
 
         if not clearance:
             raise ValidationError(
@@ -191,6 +200,19 @@ class CredentialRequestService:
         if custom_doc_code:
             credential_request._custom_doc_code = custom_doc_code
         credential_request.save()
+
+        # Bind clearance strictly to this request in PENDING state for staff review
+        if clearance.credential_request is None:
+            clearance.credential_request = credential_request
+            clearance.save(update_fields=['credential_request'])
+        else:
+            # Reusing file for new request: create fresh PENDING record
+            clearance = StudentClearance.objects.create(
+                user=actor,
+                credential_request=credential_request,
+                file=clearance.file,
+                status=ClearanceStatus.PENDING
+            )
 
         AuditService.log_action(
             actor=actor,
@@ -219,14 +241,15 @@ class CredentialRequestService:
             related_object_id=str(credential_request.id)
         )
 
-        admin_registrar_users = User.objects.filter(
-            role__in=[Role.ADMIN, Role.REGISTRAR],
+        # Notify operational Registrar (Admin is not a request processor)
+        registrar_users = User.objects.filter(
+            role=Role.REGISTRAR,
             is_active=True
         )
-        for staff_user in admin_registrar_users:
-            if staff_user != actor:
+        for reg_user in registrar_users:
+            if reg_user != actor:
                 NotificationService.create_notification(
-                    recipient=staff_user,
+                    recipient=reg_user,
                     event_type=NotificationEvent.REQUEST_CREATED,
                     message=(
                         f"New credential request "
@@ -240,7 +263,7 @@ class CredentialRequestService:
 
         if (
             credential_request.assigned_staff and
-            credential_request.assigned_staff not in admin_registrar_users and
+            credential_request.assigned_staff not in registrar_users and
             credential_request.assigned_staff != actor
         ):
             NotificationService.create_notification(
@@ -626,8 +649,15 @@ class RequirementDocumentService:
 class StudentClearanceService:
     @staticmethod
     @transaction.atomic
-    def submit_clearance(actor, file):
-        clearance = StudentClearance.objects.filter(user=actor).first()
+    def submit_clearance(actor, file, credential_request=None):
+        if credential_request:
+            clearance = StudentClearance.objects.filter(
+                user=actor, credential_request=credential_request
+            ).first()
+        else:
+            clearance = StudentClearance.objects.filter(
+                user=actor, credential_request__isnull=True
+            ).first()
 
         if clearance:
             if clearance.status == ClearanceStatus.APPROVED:
@@ -639,7 +669,10 @@ class StudentClearanceService:
             clearance.save()
         else:
             clearance = StudentClearance.objects.create(
-                user=actor, file=file, status=ClearanceStatus.PENDING
+                user=actor,
+                credential_request=credential_request,
+                file=file,
+                status=ClearanceStatus.PENDING
             )
 
         AuditService.log_action(
@@ -684,13 +717,13 @@ class StudentClearanceService:
                 notified_staff.add(req.assigned_staff)
 
         if not notified_staff:
-            admins = User.objects.filter(
-                role__in=[Role.ADMIN, Role.REGISTRAR], is_active=True
+            registrars = User.objects.filter(
+                role=Role.REGISTRAR, is_active=True
             )
-            for admin_user in admins:
-                if admin_user != actor:
+            for reg_user in registrars:
+                if reg_user != actor:
                     NotificationService.create_notification(
-                        recipient=admin_user,
+                        recipient=reg_user,
                         event_type=NotificationEvent.CLEARANCE_SUBMITTED,
                         message=f"Student clearance uploaded by {actor.username}.",
                         related_object_type='StudentClearance',
@@ -843,13 +876,13 @@ class PaymentService:
                 related_object_id=str(payment.id)
             )
         else:
-            admins = User.objects.filter(
-                role__in=[Role.ADMIN, Role.REGISTRAR], is_active=True
+            registrars = User.objects.filter(
+                role=Role.REGISTRAR, is_active=True
             )
-            for admin_user in admins:
-                if admin_user != actor:
+            for reg_user in registrars:
+                if reg_user != actor:
                     NotificationService.create_notification(
-                        recipient=admin_user,
+                        recipient=reg_user,
                         event_type=NotificationEvent.PAYMENT_SUBMITTED,
                         message=(
                             f"Payment receipt uploaded for request "

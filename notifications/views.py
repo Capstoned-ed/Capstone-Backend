@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from drf_spectacular.utils import extend_schema
-from .models import Notification
+from accounts.models import Role
+from .models import Notification, NotificationEvent
 from .serializers import NotificationSerializer
 
 
@@ -29,7 +30,16 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             return Notification.objects.none()
 
         # Strict data isolation: Users can only see their own notifications
-        return Notification.objects.filter(user=self.request.user)
+        qs = Notification.objects.filter(user=self.request.user)
+        if getattr(self.request.user, 'role', None) == Role.ADMIN:
+            qs = qs.exclude(
+                event_type__in=[
+                    NotificationEvent.REQUEST_CREATED,
+                    NotificationEvent.CLEARANCE_SUBMITTED,
+                    NotificationEvent.PAYMENT_SUBMITTED,
+                ]
+            )
+        return qs
 
     @extend_schema(responses={200: NotificationSerializer})
     @action(detail=True, methods=['patch'], url_path='read')

@@ -264,17 +264,50 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         return None
 
     def _get_clearance(self, obj):
-        user = obj.get('user') if isinstance(obj, dict) else getattr(obj, 'user', None)
+        req_id = (
+            obj.get('id') if isinstance(obj, dict) else getattr(obj, 'id', None)
+        )
+        if req_id:
+            clr = (
+                StudentClearance.objects
+                .filter(credential_request_id=req_id)
+                .order_by('-uploaded_at')
+                .first()
+            )
+            if clr:
+                return clr
+        user = (
+            obj.get('user')
+            if isinstance(obj, dict)
+            else getattr(obj, 'user', None)
+        )
         if not user:
             return None
-        if hasattr(user, 'clearance'):
+        if hasattr(user, 'clearances'):
             try:
-                return user.clearance
+                clr = (
+                    user.clearances
+                    .filter(credential_request_id=req_id)
+                    .order_by('-uploaded_at')
+                    .first()
+                )
+                if clr:
+                    return clr
             except Exception:
                 pass
         if isinstance(user, int):
-            return StudentClearance.objects.filter(user_id=user).first()
-        return StudentClearance.objects.filter(user=user).first()
+            return (
+                StudentClearance.objects
+                .filter(user_id=user, credential_request__isnull=True)
+                .order_by('-uploaded_at')
+                .first()
+            )
+        return (
+            StudentClearance.objects
+            .filter(user=user, credential_request__isnull=True)
+            .order_by('-uploaded_at')
+            .first()
+        )
 
     def get_clearance_id(self, obj):
         clearance = self._get_clearance(obj)
@@ -440,7 +473,7 @@ class StudentClearanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentClearance
         fields = [
-            'id', 'user', 'status', 'file', 'remarks',
+            'id', 'user', 'credential_request', 'status', 'file', 'remarks',
             'reviewed_by', 'reviewed_at', 'uploaded_at', 'updated_at'
         ]
         read_only_fields = fields
@@ -458,9 +491,15 @@ class StudentClearanceSubmitSerializer(serializers.ModelSerializer):
     """
     Validation layer for a student submitting an e-Clearance.
     """
+    credential_request = serializers.PrimaryKeyRelatedField(
+        queryset=CredentialRequest.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
     class Meta:
         model = StudentClearance
-        fields = ['file']
+        fields = ['file', 'credential_request']
 
 
 class StudentClearanceReviewSerializer(serializers.ModelSerializer):

@@ -80,6 +80,17 @@ class AccountService:
         """
         Updates an existing user and logs the action.
         """
+        if actor and getattr(actor, 'id', None) and getattr(user, 'id', None):
+            if str(actor.id) == str(user.id):
+                if 'role' in validated_data and validated_data['role'] != user.role:
+                    raise ValidationError(
+                        "You cannot change your own administrative role."
+                    )
+                if 'is_active' in validated_data and not validated_data['is_active']:
+                    raise ValidationError(
+                        "You cannot deactivate your own administrative account."
+                    )
+
         previous_state = {
             'username': user.username,
             'email': user.email,
@@ -152,6 +163,12 @@ class AccountService:
         """
         Soft deletes the user by setting is_active to False.
         """
+        if actor and getattr(actor, 'id', None) and getattr(user, 'id', None):
+            if str(actor.id) == str(user.id):
+                raise ValidationError(
+                    "You cannot deactivate your own administrative account."
+                )
+
         previous_state = {'is_active': user.is_active}
         user.is_active = False
         user.save(update_fields=['is_active'])

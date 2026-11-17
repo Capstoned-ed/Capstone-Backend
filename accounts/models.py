@@ -75,6 +75,13 @@ class User(AbstractUser):
         help_text=_('Academic year level (e.g., 1st year, Alumnus).'),
     )
 
+    @property
+    def clearance(self):
+        clearances_rel = getattr(self, 'clearances', None)
+        if clearances_rel is not None:
+            return clearances_rel.order_by('-uploaded_at').first()
+        return None
+
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
 
