@@ -36,6 +36,70 @@ DEFAULT_DOC_CODES = {
 }
 
 
+class RegistrarSettings(models.Model):
+    """
+    Singleton system setting for Registrar auto-approval and signatory tracking.
+    """
+    auto_approve_requests = models.BooleanField(
+        default=True,
+        help_text=(
+            "When True, requests are automatically approved on behalf of the "
+            "Registrar. When False, requests pause for manual Registrar approval."
+        )
+    )
+    default_signatory_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="Jonalin T. Lagrada, MPSM",
+        help_text="Default signatory name if no dynamic Registrar is configured."
+    )
+    default_signatory_title = models.CharField(
+        max_length=255,
+        blank=True,
+        default="University Registrar",
+        help_text="Signatory title (e.g., University Registrar)."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_registrar_settings'
+    )
+
+    class Meta:
+        verbose_name = "Registrar Settings"
+        verbose_name_plural = "Registrar Settings"
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj
+
+    @classmethod
+    def get_active_signatory(cls):
+        settings_obj = cls.get_settings()
+        from accounts.models import User, Role
+        reg_user = User.objects.filter(role=Role.REGISTRAR, is_active=True).first()
+        if reg_user:
+            first = getattr(reg_user, 'first_name', '')
+            last = getattr(reg_user, 'last_name', '')
+            full = f"{first} {last}".strip() or reg_user.username
+            return full, reg_user
+        admin_user = User.objects.filter(role=Role.ADMIN, is_active=True).first()
+        if admin_user:
+            first = getattr(admin_user, 'first_name', '')
+            last = getattr(admin_user, 'last_name', '')
+            full = f"{first} {last}".strip()
+            if full and 'Admin' not in full:
+                return full, admin_user
+        return settings_obj.default_signatory_name, None
+
+    def __str__(self):
+        return f"Registrar Settings (auto_approve={self.auto_approve_requests})"
+
+
 class CredentialType(models.Model):
     """
     Master data representing the types of credentials that can be requested.
@@ -138,6 +202,33 @@ class CredentialRequest(models.Model):
     )
     tracking_number = models.CharField(max_length=50, unique=True, editable=False)
     remarks = models.TextField(blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_credential_requests',
+        help_text="Registrar or Admin user who approved this request."
+    )
+    approved_by_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Name and title of the approving registrar/official."
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of registrar approval."
+    )
+    is_approved = models.BooleanField(
+        default=False,
+        help_text="Flag indicating whether request has received registrar approval."
+    )
+    is_auto_approved = models.BooleanField(
+        default=False,
+        help_text="Flag indicating whether approval was granted automatically."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

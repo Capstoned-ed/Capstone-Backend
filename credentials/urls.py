@@ -9,7 +9,8 @@ from .views import (
     PredictTurnaroundView,
     AdminDailyForecastView,
     AdminMonthlyWorkloadView,
-    MLHealthStatusView
+    MLHealthStatusView,
+    RegistrarApprovalSettingsView
 )
 
 router = DefaultRouter()
@@ -44,6 +45,11 @@ urlpatterns = [
         'credentials/ml-health/',
         MLHealthStatusView.as_view(),
         name='ml-health-status'
+    ),
+    path(
+        'settings/registrar-approval/',
+        RegistrarApprovalSettingsView.as_view(),
+        name='registrar-approval-settings'
     ),
     path('', include(router.urls)),
 ]

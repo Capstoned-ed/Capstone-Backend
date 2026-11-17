@@ -11,7 +11,8 @@ from .models import (
     ClearanceStatus,
     RequestStatus,
     Payment,
-    PaymentStatus
+    PaymentStatus,
+    RegistrarSettings
 )
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
@@ -133,6 +134,9 @@ class CredentialRequestService:
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
+                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+            ]},
+            {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
                 Role.REGISTRAR, Role.STAFF, Role.ADMIN
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
@@ -399,6 +403,36 @@ class CredentialRequestService:
         ]:
             credential_request.in_process_queue = False
 
+        # Registrar Auto-Approval & Signatory Gate
+        settings_obj = RegistrarSettings.get_settings()
+        if settings_obj.auto_approve_requests:
+            if not credential_request.is_approved and canonical_status in [
+                RequestStatus.REQUIREMENTS_VERIFICATION,
+                RequestStatus.PAYMENT_PENDING,
+                RequestStatus.PAYMENT_VERIFIED,
+                RequestStatus.PROCESSING,
+                RequestStatus.READY_FOR_RELEASE,
+                RequestStatus.RELEASED
+            ]:
+                signatory_name, reg_user = RegistrarSettings.get_active_signatory()
+                credential_request.is_approved = True
+                credential_request.is_auto_approved = True
+                credential_request.approved_by = reg_user or (
+                    actor if actor.role in [Role.REGISTRAR, Role.ADMIN] else None
+                )
+                credential_request.approved_by_name = signatory_name
+                credential_request.approved_at = timezone.now()
+        else:
+            if not credential_request.is_approved:
+                if canonical_status in [
+                    RequestStatus.READY_FOR_RELEASE,
+                    RequestStatus.RELEASED
+                ]:
+                    raise ValidationError(
+                        "This request requires Registrar approval before it can "
+                        "proceed to release."
+                    )
+
         credential_request.save()
 
         new_state = {
@@ -500,6 +534,63 @@ class CredentialRequestService:
             related_object_type='CredentialRequest',
             related_object_id=str(credential_request.id)
         )
+
+        return credential_request
+
+    @staticmethod
+    @transaction.atomic
+    def approve_request(actor, credential_request):
+        credential_request = (
+            CredentialRequest.objects
+            .select_for_update()
+            .get(pk=credential_request.pk)
+        )
+        if actor.role not in [Role.REGISTRAR, Role.ADMIN]:
+            raise PermissionDenied(
+                "Only Registrar or Admin can approve credential requests."
+            )
+
+        first = getattr(actor, 'first_name', '')
+        last = getattr(actor, 'last_name', '')
+        name = f"{first} {last}".strip() or actor.username
+
+        credential_request.is_approved = True
+        credential_request.is_auto_approved = False
+        credential_request.approved_by = actor
+        credential_request.approved_by_name = name
+        credential_request.approved_at = timezone.now()
+        credential_request.save(update_fields=[
+            'is_approved', 'is_auto_approved', 'approved_by',
+            'approved_by_name', 'approved_at', 'updated_at'
+        ])
+
+        AuditService.log_action(
+            actor=actor,
+            action='REQUEST_APPROVED_BY_REGISTRAR',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state={'is_approved': False},
+            new_state={
+                'is_approved': True,
+                'approved_by': str(actor.id),
+                'approved_by_name': name
+            }
+        )
+
+        if (
+            credential_request.assigned_staff and
+            credential_request.assigned_staff != actor
+        ):
+            NotificationService.create_notification(
+                recipient=credential_request.assigned_staff,
+                event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                message=(
+                    f"Request {credential_request.tracking_number} has been "
+                    f"approved by Registrar {name}."
+                ),
+                related_object_type='CredentialRequest',
+                related_object_id=str(credential_request.id)
+            )
 
         return credential_request
 

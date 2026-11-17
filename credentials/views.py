@@ -1,6 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -9,13 +10,15 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
+from audit.services import AuditService
 
 from .models import (
     CredentialType,
     CredentialRequest,
     RequirementDocument,
     StudentClearance,
-    Payment
+    Payment,
+    RegistrarSettings
 )
 from .serializers import (
     CredentialTypeSerializer,
@@ -25,7 +28,8 @@ from .serializers import (
     StudentClearanceSerializer,
     StudentClearanceSubmitSerializer,
     StudentClearanceReviewSerializer,
-    PaymentSerializer
+    PaymentSerializer,
+    RegistrarSettingsSerializer
 )
 from .permissions import (
     IsAdminOrRegistrarOrReadOnly,
@@ -373,6 +377,24 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     )
     def reopen(self, request, pk=None):
         return self.restore(request, pk=pk)
+
+    @extend_schema(responses={200: CredentialRequestSerializer})
+    @action(
+        detail=True, methods=['post'],
+        permission_classes=[IsAuthenticated]
+    )
+    def approve(self, request, pk=None):
+        credential_request = self.get_object()
+        updated_request = CredentialRequestService.approve_request(
+            actor=request.user,
+            credential_request=credential_request
+        )
+        return Response(
+            CredentialRequestSerializer(
+                updated_request, context={'request': request}
+            ).data,
+            status=status.HTTP_200_OK
+        )
 
 
 class RequirementDocumentViewSet(viewsets.ModelViewSet):
@@ -760,3 +782,66 @@ class MLHealthStatusView(APIView):
 
     def get(self, request):
         return Response(MLClient.get_health(), status=status.HTTP_200_OK)
+
+
+class RegistrarApprovalSettingsView(APIView):
+    """
+    GET /api/settings/registrar-approval/
+    PATCH /api/settings/registrar-approval/
+    Allows Registrar and Admin to view and toggle auto-approval.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: RegistrarSettingsSerializer})
+    def get(self, request):
+        settings_obj = RegistrarSettings.get_settings()
+        serializer = RegistrarSettingsSerializer(settings_obj)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=RegistrarSettingsSerializer,
+        responses={200: RegistrarSettingsSerializer}
+    )
+    def patch(self, request):
+        if request.user.role not in [Role.REGISTRAR, Role.ADMIN]:
+            raise PermissionDenied(
+                "Only Registrar or Admin can modify approval settings."
+            )
+
+        settings_obj = RegistrarSettings.get_settings()
+        prev_val = settings_obj.auto_approve_requests
+        auto_approve = request.data.get('auto_approve_requests')
+
+        if auto_approve is not None:
+            if isinstance(auto_approve, str):
+                settings_obj.auto_approve_requests = auto_approve.lower() in [
+                    'true', '1', 'yes'
+                ]
+            else:
+                settings_obj.auto_approve_requests = bool(auto_approve)
+
+        if 'default_signatory_name' in request.data:
+            settings_obj.default_signatory_name = str(
+                request.data['default_signatory_name']
+            ).strip()
+        if 'default_signatory_title' in request.data:
+            settings_obj.default_signatory_title = str(
+                request.data['default_signatory_title']
+            ).strip()
+
+        settings_obj.updated_by = request.user
+        settings_obj.save()
+
+        AuditService.log_action(
+            actor=request.user,
+            action='REGISTRAR_SETTINGS_UPDATED',
+            object_type='RegistrarSettings',
+            object_id=settings_obj.id,
+            previous_state={'auto_approve_requests': prev_val},
+            new_state={
+                'auto_approve_requests': settings_obj.auto_approve_requests
+            }
+        )
+
+        serializer = RegistrarSettingsSerializer(settings_obj)
+        return Response(serializer.data, status=status.HTTP_200_OK)
