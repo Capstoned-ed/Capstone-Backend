@@ -615,6 +615,16 @@ class PaymentService:
                 "A payment submission is already pending review for this request."
             )
 
+        if receipt_reference_number and str(receipt_reference_number).strip():
+            ref_clean = str(receipt_reference_number).strip()
+            if Payment.objects.filter(
+                receipt_reference_number__iexact=ref_clean
+            ).exclude(status=PaymentStatus.REJECTED).exists():
+                raise ValidationError(
+                    f"Receipt / O.R. reference number '{ref_clean}' has "
+                    "already been used."
+                )
+
         payment = Payment.objects.create(
             request=request,
             amount=amount,
