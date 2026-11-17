@@ -10,7 +10,8 @@ from .models import (
     Payment,
     PaymentStatus,
     RequestStatus,
-    ClearanceStatus
+    ClearanceStatus,
+    RegistrarSettings
 )
 
 
@@ -98,6 +99,7 @@ class CredentialTypeRelatedField(serializers.PrimaryKeyRelatedField):
     def to_internal_value(self, data):
         if isinstance(data, CredentialType):
             return data
+
         if isinstance(data, str) and not data.isdigit():
             clean = data.strip()
             ctype = CredentialType.objects.filter(
@@ -137,6 +139,11 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     clearance_preview = serializers.SerializerMethodField()
     clearance_file_name = serializers.SerializerMethodField()
     clearance_is_pdf = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+    approved_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    approved_at = serializers.DateTimeField(read_only=True)
+    is_approved = serializers.BooleanField(read_only=True)
+    is_auto_approved = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = CredentialRequest
@@ -148,7 +155,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'credential_name', 'credential_code', 'assigned_staff',
             'assigned_to', 'in_process_queue',
             'clearance_id', 'clearance_status', 'clearance_preview',
-            'clearance_file_name', 'clearance_is_pdf'
+            'clearance_file_name', 'clearance_is_pdf',
+            'approved_by', 'approved_by_name', 'approved_at',
+            'is_approved', 'is_auto_approved'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
@@ -156,7 +165,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'student_email', 'credential_name', 'credential_code',
             'assigned_staff', 'assigned_to', 'in_process_queue',
             'clearance_id', 'clearance_status', 'clearance_preview',
-            'clearance_file_name', 'clearance_is_pdf'
+            'clearance_file_name', 'clearance_is_pdf',
+            'approved_by', 'approved_by_name', 'approved_at',
+            'is_approved', 'is_auto_approved'
         ]
 
     def get_student_name(self, obj):
@@ -284,6 +295,34 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         if not clearance or not clearance.file or not clearance.file.name:
             return False
         return clearance.file.name.lower().endswith('.pdf')
+
+    def get_approved_by_name(self, obj):
+        name = (
+            obj.get('approved_by_name')
+            if isinstance(obj, dict)
+            else getattr(obj, 'approved_by_name', '')
+        )
+        if name:
+            return name
+        appr_by = (
+            obj.get('approved_by')
+            if isinstance(obj, dict)
+            else getattr(obj, 'approved_by', None)
+        )
+        if appr_by:
+            first = getattr(appr_by, 'first_name', '')
+            last = getattr(appr_by, 'last_name', '')
+            full = f"{first} {last}".strip()
+            return full or getattr(appr_by, 'username', '')
+        is_appr = (
+            obj.get('is_approved')
+            if isinstance(obj, dict)
+            else getattr(obj, 'is_approved', False)
+        )
+        if is_appr:
+            signatory_name, _ = RegistrarSettings.get_active_signatory()
+            return signatory_name
+        return ''
 
     def validate_credential_type(self, value):
         if not value.is_active:
@@ -491,3 +530,22 @@ class PaymentSerializer(serializers.ModelSerializer):
                 )
 
         return data
+
+
+class RegistrarSettingsSerializer(serializers.ModelSerializer):
+    active_registrar_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RegistrarSettings
+        fields = [
+            'auto_approve_requests',
+            'default_signatory_name',
+            'default_signatory_title',
+            'active_registrar_name',
+            'updated_at'
+        ]
+        read_only_fields = ['active_registrar_name', 'updated_at']
+
+    def get_active_registrar_name(self, obj):
+        name, _ = RegistrarSettings.get_active_signatory()
+        return name
