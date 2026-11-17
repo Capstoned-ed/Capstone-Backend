@@ -111,6 +111,14 @@ class NotificationAPITests(APITestCase):
         self.assertEqual(new_notif.related_object_type, 'User')
 
     def test_notification_hook_request_created(self):
+        from credentials.models import StudentClearance, ClearanceStatus
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        cfile = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearance.objects.create(
+            user=self.user1, file=cfile, status=ClearanceStatus.PENDING
+        )
         ctype = CredentialType.objects.create(
             code='TOR', name='Transcript', price=100.00, processing_days=5
         )
@@ -123,9 +131,101 @@ class NotificationAPITests(APITestCase):
                 'status': 'PENDING'
             }
         )
-        self.assertEqual(Notification.objects.count(), initial_count + 1)
-        new_notif = Notification.objects.latest('created_at')
-        self.assertEqual(new_notif.user, self.user1)
-        self.assertEqual(new_notif.event_type, NotificationEvent.REQUEST_CREATED)
-        self.assertEqual(new_notif.related_object_type, 'CredentialRequest')
-        self.assertEqual(new_notif.related_object_id, str(req.id))
+        self.assertEqual(Notification.objects.count(), initial_count + 2)
+        user_notif = Notification.objects.filter(user=self.user1).latest('created_at')
+        self.assertEqual(user_notif.user, self.user1)
+        self.assertEqual(user_notif.event_type, NotificationEvent.REQUEST_CREATED)
+        self.assertEqual(user_notif.related_object_type, 'CredentialRequest')
+        self.assertEqual(user_notif.related_object_id, str(req.id))
+
+        admin_notif = Notification.objects.filter(user=self.admin).latest('created_at')
+        self.assertEqual(admin_notif.user, self.admin)
+        self.assertEqual(admin_notif.event_type, NotificationEvent.REQUEST_CREATED)
+        self.assertEqual(admin_notif.related_object_type, 'CredentialRequest')
+        self.assertEqual(admin_notif.related_object_id, str(req.id))
+
+    def test_notification_hook_staff_assigned(self):
+        from credentials.models import (
+            CredentialType, RequestStatus, StudentClearance, ClearanceStatus
+        )
+        from credentials.services import CredentialRequestService
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        cfile = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearance.objects.get_or_create(
+            user=self.user1, defaults={'file': cfile, 'status': ClearanceStatus.PENDING}
+        )
+        staff = User.objects.create_user(
+            username='staff_test', email='st@test.com', password='p', role=Role.STAFF
+        )
+        ctype = CredentialType.objects.create(
+            code='TOR2', name='Transcript 2', price=100.00, processing_days=5
+        )
+        req = CredentialRequestService.create_request(
+            actor=self.user1,
+            validated_data={'credential_type': ctype, 'status': 'PENDING'}
+        )
+        CredentialRequestService.transition_request(
+            actor=self.admin,
+            credential_request=req,
+            new_status=RequestStatus.PENDING,
+            assigned_staff=staff
+        )
+        staff_notif = Notification.objects.filter(user=staff).latest('created_at')
+        self.assertEqual(staff_notif.event_type, NotificationEvent.REQUEST_ASSIGNED)
+        self.assertIn(req.tracking_number, staff_notif.message)
+
+    def test_notification_hook_payment_and_clearance(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from credentials.models import (
+            CredentialType, RequestStatus, StudentClearance, ClearanceStatus
+        )
+        from credentials.services import (
+            CredentialRequestService, PaymentService, StudentClearanceService
+        )
+        cfile = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearance.objects.get_or_create(
+            user=self.user1, defaults={'file': cfile, 'status': ClearanceStatus.PENDING}
+        )
+        staff = User.objects.create_user(
+            username='staff_test2', email='st2@test.com', password='p', role=Role.STAFF
+        )
+        ctype = CredentialType.objects.create(
+            code='TOR3', name='Transcript 3', price=100.00, processing_days=5
+        )
+        req = CredentialRequestService.create_request(
+            actor=self.user1,
+            validated_data={'credential_type': ctype, 'status': 'PENDING'}
+        )
+        req.assigned_staff = staff
+        req.status = RequestStatus.PAYMENT_PENDING
+        req.save()
+
+        # 1. Student uploads clearance -> staff notified
+        clearance_file = SimpleUploadedFile(
+            "clearance.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        StudentClearanceService.submit_clearance(actor=self.user1, file=clearance_file)
+        clearance_notif = Notification.objects.filter(
+            user=staff, event_type=NotificationEvent.CLEARANCE_SUBMITTED
+        ).latest('created_at')
+        self.assertIn(req.tracking_number, clearance_notif.message)
+
+        # 2. Student uploads payment -> staff notified
+        receipt_file = SimpleUploadedFile(
+            "receipt.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        PaymentService.submit_payment(
+            actor=self.user1,
+            request=req,
+            amount=100.00,
+            receipt_image=receipt_file,
+            receipt_reference_number="OR-NOTIF-1"
+        )
+        pay_notif = Notification.objects.filter(
+            user=staff, event_type=NotificationEvent.PAYMENT_SUBMITTED
+        ).latest('created_at')
+        self.assertIn(req.tracking_number, pay_notif.message)

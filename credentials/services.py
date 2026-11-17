@@ -215,6 +215,41 @@ class CredentialRequestService:
             related_object_id=str(credential_request.id)
         )
 
+        admin_registrar_users = User.objects.filter(
+            role__in=[Role.ADMIN, Role.REGISTRAR],
+            is_active=True
+        )
+        for staff_user in admin_registrar_users:
+            if staff_user != actor:
+                NotificationService.create_notification(
+                    recipient=staff_user,
+                    event_type=NotificationEvent.REQUEST_CREATED,
+                    message=(
+                        f"New credential request "
+                        f"({credential_request.tracking_number}) "
+                        f"submitted by {actor.username} for "
+                        f"{credential_request.credential_type.name}."
+                    ),
+                    related_object_type='CredentialRequest',
+                    related_object_id=str(credential_request.id)
+                )
+
+        if (
+            credential_request.assigned_staff and
+            credential_request.assigned_staff not in admin_registrar_users and
+            credential_request.assigned_staff != actor
+        ):
+            NotificationService.create_notification(
+                recipient=credential_request.assigned_staff,
+                event_type=NotificationEvent.REQUEST_CREATED,
+                message=(
+                    f"New credential request ({credential_request.tracking_number}) "
+                    f"assigned to you by {actor.username}."
+                ),
+                related_object_type='CredentialRequest',
+                related_object_id=str(credential_request.id)
+            )
+
         return credential_request
 
     @staticmethod
@@ -265,9 +300,9 @@ class CredentialRequestService:
 
         # Handle staff assignment if provided
         if assigned_staff is not None:
+            new_assigned_user = None
             if isinstance(assigned_staff, User):
-                credential_request.assigned_staff = assigned_staff
-                credential_request.in_process_queue = True
+                new_assigned_user = assigned_staff
             elif isinstance(assigned_staff, (str, int)) and str(assigned_staff).strip():
                 s_ident = str(assigned_staff).strip()
                 s_user = User.objects.filter(
@@ -281,8 +316,23 @@ class CredentialRequestService:
                         last_name__iexact=parts[1]
                     ).first()
                 if s_user:
-                    credential_request.assigned_staff = s_user
-                    credential_request.in_process_queue = True
+                    new_assigned_user = s_user
+
+            if new_assigned_user:
+                prev_staff = credential_request.assigned_staff
+                credential_request.assigned_staff = new_assigned_user
+                credential_request.in_process_queue = True
+                if new_assigned_user != prev_staff and new_assigned_user != actor:
+                    NotificationService.create_notification(
+                        recipient=new_assigned_user,
+                        event_type=NotificationEvent.REQUEST_ASSIGNED,
+                        message=(
+                            f"Request {credential_request.tracking_number} has been "
+                            f"assigned to you by {actor.username}."
+                        ),
+                        related_object_type='CredentialRequest',
+                        related_object_id=str(credential_request.id)
+                    )
 
         if in_process_queue is not None:
             credential_request.in_process_queue = bool(in_process_queue)
@@ -513,6 +563,49 @@ class StudentClearanceService:
                 'file_name': clearance.file.name
             }
         )
+
+        active_requests = CredentialRequest.objects.filter(
+            user=actor
+        ).exclude(
+            status__in=[
+                RequestStatus.RELEASED,
+                RequestStatus.REJECTED,
+                RequestStatus.CANCELLED
+            ]
+        )
+        notified_staff = set()
+        for req in active_requests:
+            if (
+                req.assigned_staff and
+                req.assigned_staff not in notified_staff and
+                req.assigned_staff != actor
+            ):
+                NotificationService.create_notification(
+                    recipient=req.assigned_staff,
+                    event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+                    message=(
+                        f"Student clearance uploaded by {actor.username} "
+                        f"for request {req.tracking_number}."
+                    ),
+                    related_object_type='StudentClearance',
+                    related_object_id=str(clearance.id)
+                )
+                notified_staff.add(req.assigned_staff)
+
+        if not notified_staff:
+            admins = User.objects.filter(
+                role__in=[Role.ADMIN, Role.REGISTRAR], is_active=True
+            )
+            for admin_user in admins:
+                if admin_user != actor:
+                    NotificationService.create_notification(
+                        recipient=admin_user,
+                        event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+                        message=f"Student clearance uploaded by {actor.username}.",
+                        related_object_type='StudentClearance',
+                        related_object_id=str(clearance.id)
+                    )
+
         return clearance
 
     @staticmethod
@@ -645,6 +738,36 @@ class PaymentService:
                 'status': payment.status
             }
         )
+
+        target_staff = request.assigned_staff
+        if target_staff and target_staff != actor:
+            NotificationService.create_notification(
+                recipient=target_staff,
+                event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                message=(
+                    f"Payment receipt uploaded for request {request.tracking_number} "
+                    f"by {actor.username}."
+                ),
+                related_object_type='Payment',
+                related_object_id=str(payment.id)
+            )
+        else:
+            admins = User.objects.filter(
+                role__in=[Role.ADMIN, Role.REGISTRAR], is_active=True
+            )
+            for admin_user in admins:
+                if admin_user != actor:
+                    NotificationService.create_notification(
+                        recipient=admin_user,
+                        event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                        message=(
+                            f"Payment receipt uploaded for request "
+                            f"{request.tracking_number} by {actor.username}."
+                        ),
+                        related_object_type='Payment',
+                        related_object_id=str(payment.id)
+                    )
+
         return payment
 
     @staticmethod

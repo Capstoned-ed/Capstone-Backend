@@ -9,6 +9,7 @@ class NotificationEvent(models.TextChoices):
     ACCOUNT_CREATED = 'ACCOUNT_CREATED', 'Account Created'
     PASSWORD_RESET = 'PASSWORD_RESET', 'Password Reset'
     REQUEST_CREATED = 'REQUEST_CREATED', 'Request Created'
+    REQUEST_ASSIGNED = 'REQUEST_ASSIGNED', 'Request Assigned'
     REQUEST_STATUS_CHANGED = 'REQUEST_STATUS_CHANGED', 'Request Status Changed'
     CLEARANCE_SUBMITTED = 'CLEARANCE_SUBMITTED', 'Clearance Submitted'
     CLEARANCE_APPROVED = 'CLEARANCE_APPROVED', 'Clearance Approved'
