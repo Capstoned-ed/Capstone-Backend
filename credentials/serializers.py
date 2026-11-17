@@ -144,6 +144,10 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     approved_at = serializers.DateTimeField(read_only=True)
     is_approved = serializers.BooleanField(read_only=True)
     is_auto_approved = serializers.BooleanField(read_only=True)
+    or_number = serializers.SerializerMethodField()
+    receipt_reference_number = serializers.SerializerMethodField()
+    receipt_image = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = CredentialRequest
@@ -157,7 +161,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'clearance_id', 'clearance_status', 'clearance_preview',
             'clearance_file_name', 'clearance_is_pdf',
             'approved_by', 'approved_by_name', 'approved_at',
-            'is_approved', 'is_auto_approved'
+            'is_approved', 'is_auto_approved',
+            'or_number', 'receipt_reference_number', 'receipt_image',
+            'payment_status'
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
@@ -167,7 +173,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'clearance_id', 'clearance_status', 'clearance_preview',
             'clearance_file_name', 'clearance_is_pdf',
             'approved_by', 'approved_by_name', 'approved_at',
-            'is_approved', 'is_auto_approved'
+            'is_approved', 'is_auto_approved',
+            'or_number', 'receipt_reference_number', 'receipt_image',
+            'payment_status'
         ]
 
     def get_student_name(self, obj):
@@ -218,6 +226,10 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             else getattr(obj, 'assigned_staff', None)
         )
         if staff:
+            if hasattr(staff, 'first_name') and hasattr(staff, 'last_name'):
+                full_name = f"{staff.first_name} {staff.last_name}".strip()
+                if full_name:
+                    return full_name
             if hasattr(staff, 'username'):
                 return staff.username
             if isinstance(staff, str):
@@ -323,6 +335,53 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             signatory_name, _ = RegistrarSettings.get_active_signatory()
             return signatory_name
         return ''
+
+    def _get_latest_payment(self, obj):
+        if isinstance(obj, dict):
+            payments = obj.get('payments')
+            if payments and isinstance(payments, list):
+                return payments[-1]
+            return None
+        if hasattr(obj, 'payments'):
+            return obj.payments.order_by('uploaded_at', 'id').last()
+        return None
+
+    def get_or_number(self, obj):
+        payment = self._get_latest_payment(obj)
+        if payment:
+            return getattr(payment, 'receipt_reference_number', '') or ''
+        return ''
+
+    def get_receipt_reference_number(self, obj):
+        return self.get_or_number(obj)
+
+    def get_receipt_image(self, obj):
+        payment = self._get_latest_payment(obj)
+        if payment and getattr(payment, 'receipt_image', None):
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(
+                    reverse('payment-download', kwargs={'pk': payment.pk})
+                )
+        return None
+
+    def get_payment_status(self, obj):
+        status_val = (
+            obj.get('status')
+            if isinstance(obj, dict)
+            else getattr(obj, 'status', None)
+        )
+        if status_val in [
+            RequestStatus.PAYMENT_VERIFIED,
+            RequestStatus.PROCESSING,
+            RequestStatus.READY_FOR_RELEASE,
+            RequestStatus.RELEASED,
+        ]:
+            return 'VERIFIED'
+        payment = self._get_latest_payment(obj)
+        if payment:
+            return getattr(payment, 'status', 'PENDING')
+        return 'NOT_SUBMITTED'
 
     def validate_credential_type(self, value):
         if not value.is_active:

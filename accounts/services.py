@@ -87,7 +87,13 @@ class AccountService:
             'is_active': user.is_active,
         }
 
-        for attr, value in validated_data.items():
+        data = validated_data.copy()
+        if 'password' in data:
+            raw_password = data.pop('password')
+            if raw_password:
+                user.set_password(raw_password)
+
+        for attr, value in data.items():
             setattr(user, attr, value)
 
         user.save()
@@ -109,6 +115,35 @@ class AccountService:
                 new_state=new_state
             )
 
+        return user
+
+    @staticmethod
+    @transaction.atomic
+    def change_password(user, current_password, new_password):
+        """
+        Verifies current password, sets hashed new password,
+        resets force_password_change, and logs audit action.
+        """
+        if not user.check_password(current_password):
+            raise ValidationError("Current password is incorrect.")
+
+        if current_password == new_password:
+            raise ValidationError(
+                "New password must be different from your current password."
+            )
+
+        user.set_password(new_password)
+        user.force_password_change = False
+        user.save(update_fields=['password', 'force_password_change'])
+
+        AuditService.log_action(
+            actor=user,
+            action='PASSWORD_CHANGED',
+            object_type='User',
+            object_id=user.id,
+            previous_state={'force_password_change': True},
+            new_state={'force_password_change': False}
+        )
         return user
 
     @staticmethod

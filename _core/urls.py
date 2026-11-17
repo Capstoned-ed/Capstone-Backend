@@ -30,6 +30,7 @@ from accounts.views import (
     PasswordResetRequestView,
     PasswordResetVerifyView,
     PasswordResetConfirmView,
+    ChangePasswordView,
 )
 
 urlpatterns = [
@@ -39,6 +40,11 @@ urlpatterns = [
         'api/auth/login/',
         CustomTokenObtainPairView.as_view(),
         name='token_obtain_pair'
+    ),
+    path(
+        'api/auth/change-password/',
+        ChangePasswordView.as_view(),
+        name='auth_change_password'
     ),
     path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/auth/logout/', TokenBlacklistView.as_view(), name='token_blacklist'),

@@ -18,6 +18,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     PasswordResetVerifySerializer,
     PasswordResetConfirmSerializer,
+    ChangePasswordSerializer,
 )
 from .permissions import IsAdminRole, IsStaffOrAdmin
 from .models import Role
@@ -236,5 +237,37 @@ class PasswordResetConfirmView(APIView):
         except DjangoValidationError as exc:
             return Response(
                 {"detail": str(exc.message if hasattr(exc, 'message') else exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ChangePasswordView(APIView):
+    """
+    Authenticated endpoint to change the current user's password.
+    Accessible to all roles (Student, Staff, Registrar, Admin).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=ChangePasswordSerializer,
+        responses={200: dict}
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            AccountService.change_password(
+                user=request.user,
+                current_password=serializer.validated_data['current_password'],
+                new_password=serializer.validated_data['new_password']
+            )
+            return Response(
+                {"detail": "Password changed successfully."},
+                status=status.HTTP_200_OK
+            )
+        except DjangoValidationError as exc:
+            msg = exc.message if hasattr(exc, 'message') else str(exc)
+            return Response(
+                {"detail": msg},
                 status=status.HTTP_400_BAD_REQUEST
             )
