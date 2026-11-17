@@ -134,7 +134,7 @@ class Command(BaseCommand):
             },
             {
                 'code': 'CAR',
-                'doc_code': '4F',
+                'doc_code': '4f',
                 'name': 'Certification - CAR',
                 'description': (
                     'Cumulative Academic Record (CAR) academic history.'
@@ -145,7 +145,7 @@ class Command(BaseCommand):
             },
             {
                 'code': 'COE',
-                'doc_code': '4A',
+                'doc_code': '4a',
                 'name': 'Certification - Officially enrolled',
                 'description': (
                     'Certificate verifying active enrollment and academic load.'
@@ -156,7 +156,7 @@ class Command(BaseCommand):
             },
             {
                 'code': 'GPA',
-                'doc_code': '4B',
+                'doc_code': '4b',
                 'name': 'Certification - GPA',
                 'description': (
                     'Official certification of overall Grade Point Average.'
