@@ -123,6 +123,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     """
     serializer_class = CredentialRequestSerializer
     permission_classes = [CredentialRequestPermission]
+    pagination_class = None
 
     def get_queryset(self):
         qs = CredentialRequest.objects.select_related(
@@ -169,12 +170,21 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
                     ).first()
 
             if target_user:
-                qs = qs.filter(
+                assigned_q = (
                     models.Q(assigned_staff=target_user) |
                     models.Q(
                         remarks__icontains=f"Assigned to: {target_user.username}"
                     )
                 )
+                target_full_name = (
+                    f"{getattr(target_user, 'first_name', '')} "
+                    f"{getattr(target_user, 'last_name', '')}"
+                ).strip()
+                if target_full_name:
+                    assigned_q |= models.Q(
+                        remarks__icontains=f"Assigned to: {target_full_name}"
+                    )
+                qs = qs.filter(assigned_q)
             else:
                 qs = qs.none()
         elif assigned_only == 'true' and user.is_authenticated:
