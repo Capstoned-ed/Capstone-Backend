@@ -327,10 +327,17 @@ def clearance_upload_path(instance, filename):
 
 class StudentClearance(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='clearance'
+        related_name='clearances'
+    )
+    credential_request = models.ForeignKey(
+        'CredentialRequest',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='clearance_records'
     )
     status = models.CharField(
         max_length=50,

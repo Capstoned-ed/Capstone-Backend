@@ -115,6 +115,23 @@ class UserViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        if str(instance.id) == str(request.user.id):
+            req_role = request.data.get('role')
+            if req_role and req_role != instance.role:
+                return Response(
+                    {"detail": "You cannot change your own administrative role."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if 'is_active' in request.data and not request.data['is_active']:
+                return Response(
+                    {
+                        "detail": (
+                            "You cannot deactivate your own administrative account."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
 
@@ -131,6 +148,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        if str(instance.id) == str(request.user.id):
+            return Response(
+                {"detail": "You cannot deactivate your own administrative account."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         AccountService.deactivate_user(
             actor=request.user,
             user=instance

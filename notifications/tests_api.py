@@ -113,6 +113,12 @@ class NotificationAPITests(APITestCase):
     def test_notification_hook_request_created(self):
         from credentials.models import StudentClearance, ClearanceStatus
         from django.core.files.uploadedfile import SimpleUploadedFile
+        registrar = User.objects.create_user(
+            username='registrar1',
+            email='reg1@test.com',
+            password='p',
+            role=Role.REGISTRAR,
+        )
         cfile = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
@@ -131,6 +137,7 @@ class NotificationAPITests(APITestCase):
                 'status': 'PENDING'
             }
         )
+        # Student + Registrar notified; Admin strictly excluded
         self.assertEqual(Notification.objects.count(), initial_count + 2)
         user_notif = Notification.objects.filter(user=self.user1).latest('created_at')
         self.assertEqual(user_notif.user, self.user1)
@@ -138,11 +145,18 @@ class NotificationAPITests(APITestCase):
         self.assertEqual(user_notif.related_object_type, 'CredentialRequest')
         self.assertEqual(user_notif.related_object_id, str(req.id))
 
-        admin_notif = Notification.objects.filter(user=self.admin).latest('created_at')
-        self.assertEqual(admin_notif.user, self.admin)
-        self.assertEqual(admin_notif.event_type, NotificationEvent.REQUEST_CREATED)
-        self.assertEqual(admin_notif.related_object_type, 'CredentialRequest')
-        self.assertEqual(admin_notif.related_object_id, str(req.id))
+        reg_notif = Notification.objects.filter(user=registrar).latest('created_at')
+        self.assertEqual(reg_notif.user, registrar)
+        self.assertEqual(reg_notif.event_type, NotificationEvent.REQUEST_CREATED)
+        self.assertEqual(reg_notif.related_object_type, 'CredentialRequest')
+        self.assertEqual(reg_notif.related_object_id, str(req.id))
+
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.admin,
+                event_type=NotificationEvent.REQUEST_CREATED,
+            ).exists()
+        )
 
     def test_notification_hook_staff_assigned(self):
         from credentials.models import (

@@ -487,7 +487,8 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         clearance = StudentClearanceService.submit_clearance(
             actor=request.user,
-            file=serializer.validated_data['file']
+            file=serializer.validated_data['file'],
+            credential_request=serializer.validated_data.get('credential_request')
         )
         headers = self.get_success_headers(serializer.data)
         return Response(
