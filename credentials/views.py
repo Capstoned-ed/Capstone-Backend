@@ -42,6 +42,8 @@ from .services import (
     PaymentService
 )
 from accounts.models import Role
+from notifications.services import NotificationService
+from notifications.models import NotificationEvent
 from .ml_client import MLClient
 
 User = get_user_model()
@@ -294,6 +296,18 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
                 'remarks': credential_request.remarks
             }
         )
+
+        if staff_user != request.user:
+            NotificationService.create_notification(
+                recipient=staff_user,
+                event_type=NotificationEvent.REQUEST_ASSIGNED,
+                message=(
+                    f"Request {credential_request.tracking_number} has been assigned "
+                    f"to you by {request.user.username}."
+                ),
+                related_object_type='CredentialRequest',
+                related_object_id=str(credential_request.id)
+            )
 
         return Response(
             CredentialRequestSerializer(
