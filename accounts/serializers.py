@@ -4,6 +4,10 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    default_error_messages = {
+        'no_active_account': 'Invalid credentials.'
+    }
+
     def validate(self, attrs):
         # Allow authenticating with either username or registered email
         username_or_email = attrs.get(self.username_field)
@@ -182,3 +186,39 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         required=True,
         help_text="New password (minimum 6 characters)."
     )
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Payload for authenticated user to update their account password.
+    """
+    current_password = serializers.CharField(
+        required=True, write_only=True
+    )
+    new_password = serializers.CharField(
+        min_length=6,
+        write_only=True,
+        required=True,
+        help_text="New password (minimum 6 characters)."
+    )
+    confirm_password = serializers.CharField(
+        min_length=6,
+        write_only=True,
+        required=True,
+        help_text="Confirm new password."
+    )
+
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError(
+                {'confirm_password': 'New password and confirmation do not match.'}
+            )
+        if attrs['current_password'] == attrs['new_password']:
+            raise serializers.ValidationError(
+                {
+                    'new_password': (
+                        'New password must be different from current password.'
+                    )
+                }
+            )
+        return attrs
