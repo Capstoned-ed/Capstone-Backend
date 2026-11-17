@@ -8,9 +8,13 @@ business logic engages.
 
 import json
 import logging
+import math
 import urllib.request
 import urllib.error
+from datetime import datetime, timedelta
 from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
 from .models import CredentialType
 
 logger = logging.getLogger(__name__)
@@ -71,6 +75,30 @@ class MLClient:
             "detail": "ML microservice is currently unreachable."
         }
 
+    @staticmethod
+    def _add_operating_days(start_date_str: str, operating_days: float) -> str:
+        """
+        Adds operating days (Mon-Fri) to start_date_str (or today) and
+        returns an ISO YYYY-MM-DD estimated completion date.
+        """
+        base_date = timezone.localdate()
+        if start_date_str:
+            try:
+                base_date = datetime.strptime(
+                    str(start_date_str)[:10], "%Y-%m-%d"
+                ).date()
+            except ValueError:
+                base_date = timezone.localdate()
+
+        days_to_add = max(1, int(math.ceil(float(operating_days or 1))))
+        current = base_date
+        added = 0
+        while added < days_to_add:
+            current += timedelta(days=1)
+            if current.weekday() < 5:  # Mon=0 .. Fri=4
+                added += 1
+        return current.isoformat()
+
     @classmethod
     def predict_processing_time(
         cls,
@@ -82,7 +110,7 @@ class MLClient:
         """
         Estimates processing turnaround time in operating days.
         Falls back to CredentialType database master data if ML microservice
-        is unreachable.
+        is unreachable. Always includes estimated_completion_date (YYYY-MM-DD).
         """
         payload = {
             "credential_type": credential_code,
@@ -93,16 +121,32 @@ class MLClient:
         res = cls._post("/predict/processing-time", payload, timeout=2.0)
         if res and res.get("status") == "success":
             res["is_fallback"] = False
+            if not res.get("estimated_completion_date"):
+                pred_days = res.get("predicted_processing_time", 3.0)
+                res["estimated_completion_date"] = cls._add_operating_days(
+                    date_requested, pred_days
+                )
             return res
 
         # Graceful fallback: query CredentialType from database
-        ctype = CredentialType.objects.filter(code=credential_code).first()
+        raw_code = str(credential_code or '').strip()
+        ctype = (
+            CredentialType.objects.filter(
+                Q(code__iexact=raw_code)
+                | Q(doc_code__iexact=raw_code)
+                | Q(name__icontains=raw_code)
+            ).first()
+            if raw_code
+            else None
+        )
         base_days = float(ctype.processing_days) if ctype else 3.0
         fallback_days = base_days + (0.5 if num_documents > 1 else 0.0)
+        est_date = cls._add_operating_days(date_requested, fallback_days)
 
         return {
             "status": "success",
             "predicted_processing_time": fallback_days,
+            "estimated_completion_date": est_date,
             "unit": "operating_days",
             "model_version": "database-fallback-v1",
             "basis": "database_credential_type",
