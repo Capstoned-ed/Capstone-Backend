@@ -940,17 +940,21 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 class RegistrarSettingsSerializer(serializers.ModelSerializer):
     active_registrar_name = serializers.SerializerMethodField()
+    auto_approve = serializers.BooleanField(
+        source='auto_approve_requests', read_only=True
+    )
 
     class Meta:
         model = RegistrarSettings
         fields = [
             'auto_approve_requests',
+            'auto_approve',
             'default_signatory_name',
             'default_signatory_title',
             'active_registrar_name',
             'updated_at'
         ]
-        read_only_fields = ['active_registrar_name', 'updated_at']
+        read_only_fields = ['active_registrar_name', 'auto_approve', 'updated_at']
 
     def get_active_registrar_name(self, obj):
         request = self.context.get('request')

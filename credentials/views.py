@@ -828,6 +828,8 @@ class RegistrarApprovalSettingsView(APIView):
         settings_obj = RegistrarSettings.get_settings()
         prev_val = settings_obj.auto_approve_requests
         auto_approve = request.data.get('auto_approve_requests')
+        if auto_approve is None:
+            auto_approve = request.data.get('auto_approve')
 
         if auto_approve is not None:
             if isinstance(auto_approve, str):
