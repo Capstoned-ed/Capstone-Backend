@@ -51,5 +51,10 @@ urlpatterns = [
         RegistrarApprovalSettingsView.as_view(),
         name='registrar-approval-settings'
     ),
+    path(
+        'requests/auto-approve/',
+        RegistrarApprovalSettingsView.as_view(),
+        name='requests-auto-approve-settings'
+    ),
     path('', include(router.urls)),
 ]

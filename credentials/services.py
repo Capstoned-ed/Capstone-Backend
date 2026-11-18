@@ -106,20 +106,20 @@ class CredentialRequestService:
     TRANSITION_MATRIX = {
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.ADMIN]}
+                'roles': [Role.STAFF, Role.REGISTRAR]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -127,36 +127,36 @@ class CredentialRequestService:
         ],
         RequestStatus.PAYMENT_PENDING: [
             {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': [Role.STAFF, Role.ADMIN]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.ADMIN]}
+                'roles': [Role.STAFF, Role.REGISTRAR]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.STAFF
             ]},
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
-                Role.REGISTRAR, Role.STAFF, Role.ADMIN
+                Role.REGISTRAR, Role.STAFF
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR
             ]}
         ],
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR
             ]}
         ],
         RequestStatus.READY_FOR_RELEASE: [
             {'status': RequestStatus.RELEASED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN, Role.STAFF
+                Role.REGISTRAR, Role.STAFF
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
-                Role.REGISTRAR, Role.ADMIN
+                Role.REGISTRAR
             ]}
         ],
         RequestStatus.RELEASED: [],
@@ -312,11 +312,30 @@ class CredentialRequestService:
             'READY_FOR_PICKUP': RequestStatus.READY_FOR_RELEASE,
             'READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
             'RELEASING': RequestStatus.READY_FOR_RELEASE,
+            'APPROVED': RequestStatus.READY_FOR_RELEASE,
+            'APPROVED / READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+            'PENDING_REGISTRAR_APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
+            'PENDING REGISTRAR APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
+            'RETURNED TO STAFF / FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+            'RELEASED / COMPLETED': RequestStatus.RELEASED,
             'CLAIMED': RequestStatus.RELEASED,
             'COMPLETED': RequestStatus.RELEASED,
         }
         clean_key = str(new_status).strip().upper().replace('-', '_')
         canonical_status = status_map.get(clean_key, clean_key)
+
+        settings_obj = RegistrarSettings.get_settings()
+        auto_approved_bypass = False
+
+        # When Staff sends a request to PENDING_REGISTRAR_APPROVAL, check
+        # persisted Registrar Auto-Approve setting: if True, bypass straight to
+        # READY_FOR_RELEASE; if False, pause in PROCESSING for manual approval.
+        if canonical_status == 'PENDING_REGISTRAR_APPROVAL':
+            if settings_obj.auto_approve_requests:
+                canonical_status = RequestStatus.READY_FOR_RELEASE
+                auto_approved_bypass = True
+            else:
+                canonical_status = RequestStatus.PROCESSING
 
         if clean_key in ['RESTORE', 'REOPEN']:
             return CredentialRequestService.restore_request(
@@ -421,11 +440,42 @@ class CredentialRequestService:
         transition = next(
             (t for t in allowed_transitions if t['status'] == canonical_status), None)
 
+        # Allow Registrar to return a request from PROCESSING / READY_FOR_RELEASE
+        # back to Staff (PAYMENT_VERIFIED) without altering Staff's matrix.
+        if (
+            not transition
+            and actor.role == Role.REGISTRAR
+            and current_status in [
+                RequestStatus.PROCESSING, RequestStatus.READY_FOR_RELEASE
+            ]
+            and canonical_status == RequestStatus.PAYMENT_VERIFIED
+        ):
+            transition = {
+                'status': RequestStatus.PAYMENT_VERIFIED,
+                'roles': [Role.REGISTRAR],
+            }
+
         if not transition:
             raise ValidationError(
                 f"Invalid transition from {current_status} to {canonical_status}.")
 
-        if actor.role not in transition['roles']:
+        # Admins have strictly read-only access to request status processing
+        if actor.role == Role.ADMIN:
+            raise PermissionDenied(
+                "Admins have read-only access to request processing."
+            )
+
+        # When Auto-Approve is ON and Staff hands a PROCESSING request off via
+        # PENDING_REGISTRAR_APPROVAL, bypass manual Registrar approval straight
+        # to READY_FOR_RELEASE; raw direct READY_FOR_RELEASE stays Registrar-only.
+        if (
+            auto_approved_bypass
+            and actor.role == Role.STAFF
+            and canonical_status == RequestStatus.READY_FOR_RELEASE
+            and settings_obj.auto_approve_requests
+        ):
+            pass
+        elif actor.role not in transition['roles']:
             raise PermissionDenied(
                 "You do not have permission to perform this transition."
             )
@@ -463,9 +513,12 @@ class CredentialRequestService:
             credential_request.in_process_queue = False
 
         # Registrar Auto-Approval & Signatory Gate
-        settings_obj = RegistrarSettings.get_settings()
+        auto_approve_audit_note = None
         if settings_obj.auto_approve_requests:
-            if not credential_request.is_approved and canonical_status in [
+            if (
+                not credential_request.is_approved
+                or auto_approved_bypass
+            ) and canonical_status in [
                 RequestStatus.REQUIREMENTS_VERIFICATION,
                 RequestStatus.PAYMENT_PENDING,
                 RequestStatus.PAYMENT_VERIFIED,
@@ -477,10 +530,24 @@ class CredentialRequestService:
                 credential_request.is_approved = True
                 credential_request.is_auto_approved = True
                 credential_request.approved_by = reg_user or (
-                    actor if actor.role in [Role.REGISTRAR, Role.ADMIN] else None
+                    actor if actor.role == Role.REGISTRAR else None
                 )
                 credential_request.approved_by_name = signatory_name
                 credential_request.approved_at = timezone.now()
+                if auto_approved_bypass:
+                    auto_approve_audit_note = (
+                        "Auto-approved via Registrar Auto-Approve setting"
+                    )
+                    if auto_approve_audit_note not in (
+                        credential_request.remarks or ''
+                    ):
+                        combined = (
+                            f"{credential_request.remarks or ''} "
+                            f"{auto_approve_audit_note}"
+                        ).strip()
+                        credential_request.remarks = _preserve_metadata_tags(
+                            previous_state['remarks'], combined
+                        )
         else:
             if not credential_request.is_approved:
                 if canonical_status in [
@@ -498,6 +565,8 @@ class CredentialRequestService:
             'status': credential_request.status,
             'remarks': credential_request.remarks
         }
+        if auto_approve_audit_note:
+            new_state['auto_approved_note'] = auto_approve_audit_note
 
         AuditService.log_action(
             actor=actor,
