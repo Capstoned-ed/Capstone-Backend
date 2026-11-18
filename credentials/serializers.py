@@ -126,6 +126,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     custom_doc_code = serializers.CharField(
         max_length=20, required=False, write_only=True
     )
+    copies = serializers.IntegerField(
+        required=False, min_value=1, max_value=99, write_only=True
+    )
     student_name = serializers.SerializerMethodField()
     student_id = serializers.SerializerMethodField()
     student_email = serializers.SerializerMethodField()
@@ -154,7 +157,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
-            'documents', 'payments', 'custom_doc_code',
+            'documents', 'payments', 'custom_doc_code', 'copies',
             'student_name', 'student_id', 'student_email',
             'credential_name', 'credential_code', 'assigned_staff',
             'assigned_to', 'in_process_queue',
@@ -423,6 +426,38 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate(self, attrs):
+        import re
+        copies_val = attrs.pop('copies', None)
+        if copies_val is not None:
+            remarks = str(attrs.get('remarks') or '').strip()
+            if not re.search(r'\[Copies:\s*\d+', remarks, re.IGNORECASE):
+                tag = f"[Copies: {int(copies_val)}]"
+                attrs['remarks'] = f"{remarks} {tag}".strip() if remarks else tag
+        return super().validate(attrs)
+
+    def _extract_copies(self, obj):
+        import re
+        remarks = (
+            obj.get('remarks')
+            if isinstance(obj, dict)
+            else getattr(obj, 'remarks', '')
+        ) or ''
+        match = re.search(r'\[Copies:\s*(\d+)', str(remarks), re.IGNORECASE)
+        if match:
+            try:
+                val = int(match.group(1))
+                if val >= 1:
+                    return val
+            except (TypeError, ValueError):
+                pass
+        return 1
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['copies'] = self._extract_copies(instance)
+        return ret
+
 
 class RequirementDocumentSerializer(serializers.ModelSerializer):
     """
@@ -645,5 +680,7 @@ class RegistrarSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ['active_registrar_name', 'updated_at']
 
     def get_active_registrar_name(self, obj):
-        name, _ = RegistrarSettings.get_active_signatory()
+        request = self.context.get('request')
+        actor = request.user if request and getattr(request, 'user', None) else None
+        name, _ = RegistrarSettings.get_active_signatory(actor=actor)
         return name

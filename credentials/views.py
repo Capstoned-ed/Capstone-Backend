@@ -232,7 +232,9 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         )
         headers = self.get_success_headers(serializer.data)
         return Response(
-            CredentialRequestSerializer(credential_request).data,
+            CredentialRequestSerializer(
+                credential_request, context={'request': request}
+            ).data,
             status=status.HTTP_201_CREATED,
             headers=headers
         )
@@ -640,7 +642,9 @@ class PaymentViewSet(viewsets.ModelViewSet):
             remarks=remarks
         )
 
-        return Response(PaymentSerializer(updated_payment).data)
+        return Response(
+            PaymentSerializer(updated_payment, context={'request': request}).data
+        )
 
     def update(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -806,7 +810,9 @@ class RegistrarApprovalSettingsView(APIView):
     @extend_schema(responses={200: RegistrarSettingsSerializer})
     def get(self, request):
         settings_obj = RegistrarSettings.get_settings()
-        serializer = RegistrarSettingsSerializer(settings_obj)
+        serializer = RegistrarSettingsSerializer(
+            settings_obj, context={'request': request}
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
@@ -835,6 +841,10 @@ class RegistrarApprovalSettingsView(APIView):
             settings_obj.default_signatory_name = str(
                 request.data['default_signatory_name']
             ).strip()
+        elif request.user.role == Role.REGISTRAR:
+            actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+            if actor_name:
+                settings_obj.default_signatory_name = actor_name
         if 'default_signatory_title' in request.data:
             settings_obj.default_signatory_title = str(
                 request.data['default_signatory_title']
@@ -854,5 +864,7 @@ class RegistrarApprovalSettingsView(APIView):
             }
         )
 
-        serializer = RegistrarSettingsSerializer(settings_obj)
+        serializer = RegistrarSettingsSerializer(
+            settings_obj, context={'request': request}
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
