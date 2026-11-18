@@ -52,7 +52,7 @@ class RegistrarSettings(models.Model):
     default_signatory_name = models.CharField(
         max_length=255,
         blank=True,
-        default="Jonalin T. Lagrada, MPSM",
+        default="",
         help_text="Default signatory name if no dynamic Registrar is configured."
     )
     default_signatory_title = models.CharField(
@@ -80,23 +80,47 @@ class RegistrarSettings(models.Model):
         return obj
 
     @classmethod
-    def get_active_signatory(cls):
+    def get_active_signatory(cls, actor=None):
         settings_obj = cls.get_settings()
         from accounts.models import User, Role
-        reg_user = User.objects.filter(role=Role.REGISTRAR, is_active=True).first()
+
+        def _format_user_name(u):
+            first = getattr(u, 'first_name', '') or ''
+            last = getattr(u, 'last_name', '') or ''
+            return f"{first} {last}".strip() or getattr(u, 'username', '')
+
+        # 1. Currently authenticated Registrar user (live session signatory)
+        if actor and getattr(actor, 'is_authenticated', False):
+            is_active_reg = (
+                getattr(actor, 'role', None) == Role.REGISTRAR
+                and getattr(actor, 'is_active', True)
+            )
+            if is_active_reg:
+                return _format_user_name(actor), actor
+
+        # 2. Registrar who most recently updated RegistrarSettings
+        updated_by = getattr(settings_obj, 'updated_by', None)
+        if (
+            updated_by
+            and getattr(updated_by, 'role', None) == Role.REGISTRAR
+            and getattr(updated_by, 'is_active', True)
+        ):
+            return _format_user_name(updated_by), updated_by
+
+        # 3. Most recently logged-in active Registrar account in DB
+        reg_user = (
+            User.objects.filter(role=Role.REGISTRAR, is_active=True)
+            .order_by('-last_login', 'id')
+            .first()
+        )
         if reg_user:
-            first = getattr(reg_user, 'first_name', '')
-            last = getattr(reg_user, 'last_name', '')
-            full = f"{first} {last}".strip() or reg_user.username
-            return full, reg_user
-        admin_user = User.objects.filter(role=Role.ADMIN, is_active=True).first()
-        if admin_user:
-            first = getattr(admin_user, 'first_name', '')
-            last = getattr(admin_user, 'last_name', '')
-            full = f"{first} {last}".strip()
-            if full and 'Admin' not in full:
-                return full, admin_user
-        return settings_obj.default_signatory_name, None
+            return _format_user_name(reg_user), reg_user
+
+        # 4. Configured signatory name fallback (never hardcoded to a specific person)
+        configured = (settings_obj.default_signatory_name or '').strip()
+        if configured:
+            return configured, None
+        return "University Registrar", None
 
     def __str__(self):
         return f"Registrar Settings (auto_approve={self.auto_approve_requests})"
