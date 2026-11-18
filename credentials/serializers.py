@@ -101,8 +101,8 @@ def extract_request_document_items(obj):
                     copies = max(1, int(it.get('copies') or 1))
                     unit_price = _to_decimal(
                         it.get('unit_price'),
-                        fallback=(
-                            primary_ct.price if primary_ct else Decimal('0.00')
+                        fallback=_to_decimal(
+                            primary_ct.price if primary_ct else None
                         ),
                     )
                     subtotal = (unit_price * copies).quantize(Decimal('0.01'))
@@ -136,10 +136,8 @@ def extract_request_document_items(obj):
             doc_name = m.group(1).strip()
             copies = max(1, int(m.group(2)))
             ct = _resolve_credential_type_record({'name': doc_name})
-            unit_price = (
-                ct.price
-                if ct
-                else (primary_ct.price if primary_ct else Decimal('0.00'))
+            unit_price = _to_decimal(
+                ct.price if ct else (primary_ct.price if primary_ct else None)
             )
             subtotal = (unit_price * copies).quantize(Decimal('0.01'))
             normalized.append({
@@ -155,7 +153,7 @@ def extract_request_document_items(obj):
 
     # 3. Single-document fallback from primary credential_type + extracted copies
     copies = _extract_copies_from_remarks(remarks)
-    unit_price = primary_ct.price if primary_ct else Decimal('0.00')
+    unit_price = _to_decimal(primary_ct.price if primary_ct else None)
     subtotal = (unit_price * copies).quantize(Decimal('0.01'))
     return [{
         'credential_type_id': primary_ct.id if primary_ct else None,
@@ -200,8 +198,8 @@ def extract_request_total_amount(obj):
         if isinstance(obj, dict)
         else getattr(obj, 'credential_type', None)
     )
-    if isinstance(primary_ct, CredentialType) and primary_ct.price:
-        return Decimal(primary_ct.price).quantize(Decimal('0.01'))
+    if isinstance(primary_ct, CredentialType) and primary_ct.price is not None:
+        return _to_decimal(primary_ct.price)
     return Decimal('0.00')
 
 
@@ -638,12 +636,12 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
                 ct = _resolve_credential_type_record(item)
                 copies = max(1, int(item.get('copies') or 1))
                 unit_price = (
-                    ct.price
+                    _to_decimal(ct.price)
                     if ct
                     else _to_decimal(
                         item.get('unit_price'),
-                        fallback=(
-                            primary_ct.price if primary_ct else Decimal('0.00')
+                        fallback=_to_decimal(
+                            primary_ct.price if primary_ct else None
                         ),
                     )
                 )
@@ -712,7 +710,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
                 r'\[Total:\s*[\d.]+', remarks, re.IGNORECASE
             ):
                 computed_total = (
-                    Decimal(primary_ct.price) * effective_copies
+                    _to_decimal(primary_ct.price) * effective_copies
                 ).quantize(Decimal('0.01'))
                 remarks = f"{remarks} [Total:{computed_total:.2f}]".strip()
             attrs['remarks'] = remarks
