@@ -91,12 +91,20 @@ class RegistrarSettings(models.Model):
 
         # 1. Currently authenticated Registrar user (live session signatory)
         if actor and getattr(actor, 'is_authenticated', False):
-            if getattr(actor, 'role', None) == Role.REGISTRAR and getattr(actor, 'is_active', True):
+            is_active_reg = (
+                getattr(actor, 'role', None) == Role.REGISTRAR
+                and getattr(actor, 'is_active', True)
+            )
+            if is_active_reg:
                 return _format_user_name(actor), actor
 
-        # 2. Registrar who most recently updated RegistrarSettings (e.g., toggled Auto-Approve)
+        # 2. Registrar who most recently updated RegistrarSettings
         updated_by = getattr(settings_obj, 'updated_by', None)
-        if updated_by and getattr(updated_by, 'role', None) == Role.REGISTRAR and getattr(updated_by, 'is_active', True):
+        if (
+            updated_by
+            and getattr(updated_by, 'role', None) == Role.REGISTRAR
+            and getattr(updated_by, 'is_active', True)
+        ):
             return _format_user_name(updated_by), updated_by
 
         # 3. Most recently logged-in active Registrar account in DB

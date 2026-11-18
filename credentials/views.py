@@ -842,7 +842,10 @@ class RegistrarApprovalSettingsView(APIView):
                 request.data['default_signatory_name']
             ).strip()
         elif request.user.role == Role.REGISTRAR:
-            actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+            full_name = (
+                f"{request.user.first_name} {request.user.last_name}".strip()
+            )
+            actor_name = full_name or request.user.username
             if actor_name:
                 settings_obj.default_signatory_name = actor_name
         if 'default_signatory_title' in request.data:
