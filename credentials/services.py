@@ -364,6 +364,27 @@ class CredentialRequestService:
         if in_process_queue is not None:
             credential_request.in_process_queue = bool(in_process_queue)
 
+        def _preserve_metadata_tags(existing_text, new_text):
+            import re
+            existing = str(existing_text or '')
+            updated = str(new_text or '').strip()
+            tags_to_keep = []
+            patterns = [
+                (r'\[Copies:[^\]]+\]', r'\[Copies:'),
+                (r'\[Total:[^\]]+\]', r'\[Total:'),
+                (r'\[Items:\[[\s\S]*?\]\]', r'\[Items:\['),
+            ]
+            for full_pat, check_pat in patterns:
+                if not re.search(check_pat, updated, re.IGNORECASE):
+                    m = re.search(full_pat, existing, re.IGNORECASE)
+                    if m:
+                        tags_to_keep.append(m.group(0))
+            if tags_to_keep:
+                return ' '.join(
+                    p for p in [updated, *tags_to_keep] if p
+                ).strip()
+            return updated
+
         # Allow Staff/Registrar/Admin to update remarks without changing status
         if canonical_status == current_status:
             if actor.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
@@ -372,7 +393,9 @@ class CredentialRequestService:
                 )
             if remarks is not None:
                 previous_remarks = credential_request.remarks
-                credential_request.remarks = remarks
+                credential_request.remarks = _preserve_metadata_tags(
+                    previous_remarks, remarks
+                )
                 credential_request.save()
                 AuditService.log_action(
                     actor=actor,
@@ -383,7 +406,10 @@ class CredentialRequestService:
                         'status': current_status,
                         'remarks': previous_remarks
                     },
-                    new_state={'status': current_status, 'remarks': remarks}
+                    new_state={
+                        'status': current_status,
+                        'remarks': credential_request.remarks
+                    }
                 )
             else:
                 credential_request.save()
@@ -417,7 +443,9 @@ class CredentialRequestService:
 
         credential_request.status = canonical_status
         if remarks is not None:
-            credential_request.remarks = remarks
+            credential_request.remarks = _preserve_metadata_tags(
+                previous_state['remarks'], remarks
+            )
 
         # Persist Staff processor in DB if request was unassigned
         if (
