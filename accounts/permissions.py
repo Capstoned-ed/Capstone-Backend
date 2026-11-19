@@ -1,3 +1,4 @@
+from django.db.models import Model
 from rest_framework.permissions import BasePermission
 from .models import Role
 
@@ -8,11 +9,12 @@ def _check_live_user_role(request, allowed_roles):
         return False
 
     # Check live DB state for authenticated model instances
-    pk = getattr(user, 'pk', None)
-    if pk and hasattr(user, '_meta'):
+    if isinstance(user, Model) and user.pk is not None:
         from django.contrib.auth import get_user_model
         UserModel = get_user_model()
-        row = UserModel.objects.filter(pk=pk).values('role', 'is_active').first()
+        row = UserModel.objects.filter(pk=user.pk).values(
+            'role', 'is_active'
+        ).first()
         if not row or not row['is_active']:
             return False
         user.role = row['role']
