@@ -2,6 +2,23 @@ from rest_framework import permissions
 from accounts.models import Role
 
 
+def _sync_live_user(request):
+    user = getattr(request, 'user', None)
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    pk = getattr(user, 'pk', None)
+    if pk and hasattr(user, '_meta'):
+        from django.contrib.auth import get_user_model
+        UserModel = get_user_model()
+        row = UserModel.objects.filter(pk=pk).values('role', 'is_active').first()
+        if not row or not row['is_active']:
+            return False
+        user.role = row['role']
+        user.is_active = row['is_active']
+        return True
+    return bool(getattr(user, 'is_active', True))
+
+
 class IsAdminOrRegistrarOrReadOnly(permissions.BasePermission):
     """
     Custom permission to only allow Admins or Registrars to edit it.
@@ -9,15 +26,13 @@ class IsAdminOrRegistrarOrReadOnly(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        # Read permissions are allowed to any authenticated request,
-        if request.method in permissions.SAFE_METHODS:
-            return bool(request.user and request.user.is_authenticated)
+        if not _sync_live_user(request):
+            return False
 
-        # Write permissions are only allowed to Admin or Registrar
-        return bool(
-            request.user and request.user.is_authenticated and
-            request.user.role in [Role.ADMIN, Role.REGISTRAR]
-        )
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        return request.user.role in [Role.ADMIN, Role.REGISTRAR]
 
 
 class CredentialRequestPermission(permissions.BasePermission):
@@ -30,8 +45,13 @@ class CredentialRequestPermission(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        if not request.user.is_authenticated:
+        if not _sync_live_user(request):
             return False
+
+        if getattr(view, 'action', None) == 'assign':
+            return request.user.role in [
+                Role.STAFF, Role.REGISTRAR, Role.ADMIN
+            ]
 
         if request.method == 'POST':
             return request.user.role == Role.STUDENT
@@ -62,7 +82,7 @@ class RequirementDocumentPermission(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        if not request.user.is_authenticated:
+        if not _sync_live_user(request):
             return False
 
         if request.method == 'POST':
@@ -88,7 +108,7 @@ class StudentClearancePermission(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        if not request.user.is_authenticated:
+        if not _sync_live_user(request):
             return False
 
         if request.method == 'POST':

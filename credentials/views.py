@@ -70,7 +70,15 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
 
-        if user.is_authenticated and user.role not in [Role.ADMIN, Role.REGISTRAR]:
+        include_inactive = (
+            self.request.query_params.get('include_inactive') == 'true' or
+            self.request.query_params.get('all') == 'true'
+        )
+        is_admin_or_reg = (
+            user.is_authenticated and
+            user.role in [Role.ADMIN, Role.REGISTRAR]
+        )
+        if not include_inactive and not is_admin_or_reg:
             return qs.filter(is_active=True)
 
         return qs
@@ -258,33 +266,78 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        target_staff_identifier = (
-            request.data.get('assigned_staff') or
-            request.user.username
+        has_assign_param = (
+            'assigned_staff' in request.data or
+            'assigned_to' in request.data
         )
-        staff_user = None
-        if target_staff_identifier:
-            raw_target = str(target_staff_identifier).strip()
+        target_staff_identifier = (
+            request.data.get('assigned_staff')
+            if 'assigned_staff' in request.data
+            else request.data.get('assigned_to')
+        )
+        if not has_assign_param:
+            target_staff_identifier = request.user.username
+
+        import re
+        if (
+            target_staff_identifier is None or
+            str(target_staff_identifier).strip() == '' or
+            str(target_staff_identifier).strip().lower() in ['unassigned', 'none']
+        ):
+            credential_request.assigned_staff = None
+            credential_request.in_process_queue = False
+            clean_rem = re.sub(
+                r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '',
+                credential_request.remarks or ''
+            ).strip(' |')
+            credential_request.remarks = clean_rem
+            credential_request.save()
+
+            from audit.services import AuditService
+            AuditService.log_action(
+                actor=request.user,
+                action='REQUEST_UNASSIGNED',
+                object_type='CredentialRequest',
+                object_id=credential_request.id,
+                previous_state=None,
+                new_state={
+                    'assigned_staff': None,
+                    'in_process_queue': False,
+                    'remarks': credential_request.remarks
+                }
+            )
+            return Response(
+                CredentialRequestSerializer(
+                    credential_request, context={'request': request}
+                ).data,
+                status=status.HTTP_200_OK
+            )
+
+        raw_target = str(target_staff_identifier).strip()
+        staff_user = User.objects.filter(
+            models.Q(username__iexact=raw_target) |
+            models.Q(
+                id=int(raw_target) if raw_target.isdigit() else -1
+            )
+        ).first()
+        if not staff_user and ' ' in raw_target:
+            parts = raw_target.split(None, 1)
             staff_user = User.objects.filter(
-                models.Q(username__iexact=raw_target) |
-                models.Q(
-                    id=int(raw_target) if raw_target.isdigit() else -1
-                )
+                first_name__iexact=parts[0],
+                last_name__iexact=parts[1]
             ).first()
-            if not staff_user and ' ' in raw_target:
-                parts = raw_target.split(None, 1)
-                staff_user = User.objects.filter(
-                    first_name__iexact=parts[0],
-                    last_name__iexact=parts[1]
-                ).first()
-            if not staff_user:
-                staff_user = User.objects.filter(
-                    models.Q(first_name__iexact=raw_target) |
-                    models.Q(last_name__iexact=raw_target) |
-                    models.Q(email__iexact=raw_target)
-                ).first()
         if not staff_user:
-            staff_user = request.user
+            staff_user = User.objects.filter(
+                models.Q(first_name__iexact=raw_target) |
+                models.Q(last_name__iexact=raw_target) |
+                models.Q(email__iexact=raw_target)
+            ).first()
+
+        if not staff_user or staff_user.role != Role.STAFF or not staff_user.is_active:
+            return Response(
+                {"detail": "Only active staff members can be assigned to requests."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         credential_request.assigned_staff = staff_user
         credential_request.in_process_queue = True
@@ -587,14 +640,28 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if request.user.role == Role.STUDENT and req.user != request.user:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        payment = PaymentService.submit_payment(
-            actor=request.user,
-            request=req,
-            amount=serializer.validated_data['amount'],
-            receipt_image=serializer.validated_data['receipt_image'],
-            receipt_reference_number=serializer.validated_data.get(
-                'receipt_reference_number', '')
-        )
+        from django.db import IntegrityError
+        try:
+            payment = PaymentService.submit_payment(
+                actor=request.user,
+                request=req,
+                amount=serializer.validated_data['amount'],
+                receipt_image=serializer.validated_data['receipt_image'],
+                receipt_reference_number=serializer.validated_data.get(
+                    'receipt_reference_number', '')
+            )
+        except IntegrityError:
+            return Response(
+                {
+                    "or_number": [
+                        "This Official Receipt (O.R.) number is already in use."
+                    ],
+                    "receipt_reference_number": [
+                        "This Official Receipt (O.R.) number is already in use."
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
         headers = self.get_success_headers(serializer.data)
         return Response(
             PaymentSerializer(payment, context={'request': request}).data,

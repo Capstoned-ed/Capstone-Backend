@@ -93,3 +93,37 @@ class MyAuditLogListView(APIView):
         )
         data = [_format_audit_log(log, request.user) for log in logs]
         return Response(data, status=status.HTTP_200_OK)
+
+
+class AuditLogListView(APIView):
+    """
+    Returns audit log entries across the system for administrators.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', None) != 'admin':
+            return Response(
+                {"detail": "Only administrators can view system audit logs."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        qs = AuditLog.objects.select_related('actor').order_by('-timestamp')
+        action = request.query_params.get('action')
+        if action:
+            qs = qs.filter(action__iexact=action)
+        actor_id = request.query_params.get('actor_id')
+        if actor_id:
+            qs = qs.filter(actor_id=actor_id)
+
+        try:
+            limit = min(int(request.query_params.get('page_size', 100)), 200)
+        except ValueError:
+            limit = 100
+
+        logs = qs[:limit]
+        data = [
+            _format_audit_log(log, log.actor or request.user)
+            for log in logs
+        ]
+        return Response(data, status=status.HTTP_200_OK)

@@ -185,6 +185,7 @@ class RequestStatus(models.TextChoices):
     REQUIREMENTS_VERIFICATION = 'REQUIREMENTS_VERIFICATION', 'Requirements Verification'
     REQUIREMENTS_REJECTED = 'REQUIREMENTS_REJECTED', 'Requirements Rejected'
     PAYMENT_PENDING = 'PAYMENT_PENDING', 'Payment Pending'
+    FOR_VERIFICATION = 'FOR_VERIFICATION', 'For Verification'
     PAYMENT_VERIFIED = 'PAYMENT_VERIFIED', 'Payment Verified'
     PROCESSING = 'PROCESSING', 'Processing'
     READY_FOR_RELEASE = 'READY_FOR_RELEASE', 'Ready for Release'

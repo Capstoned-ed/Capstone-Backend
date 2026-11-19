@@ -126,7 +126,51 @@ class AccountService:
                 new_state=new_state
             )
 
+            # If user was STAFF and role changed away from STAFF, or if deactivated:
+            # automatically unassign any open/non-terminal requests
+            role_changed_away = (
+                previous_state.get('role') == 'staff' and user.role != 'staff'
+            )
+            was_deactivated = (
+                previous_state.get('is_active') is True and not user.is_active
+            )
+            if role_changed_away or was_deactivated:
+                AccountService._unassign_orphaned_requests_for_user(actor, user)
+
         return user
+
+    @staticmethod
+    def _unassign_orphaned_requests_for_user(actor, user):
+        from credentials.models import CredentialRequest, RequestStatus
+        import re
+        open_requests = CredentialRequest.objects.filter(
+            assigned_staff=user
+        ).exclude(
+            status__in=[
+                RequestStatus.RELEASED,
+                RequestStatus.REJECTED,
+                RequestStatus.CANCELLED
+            ]
+        )
+        for req in open_requests:
+            req.assigned_staff = None
+            req.in_process_queue = False
+            if req.remarks:
+                clean_rem = re.sub(
+                    r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '', req.remarks
+                ).strip(' |')
+                req.remarks = clean_rem
+            req.save(
+                update_fields=['assigned_staff', 'in_process_queue', 'remarks']
+            )
+            AuditService.log_action(
+                actor=actor,
+                action='REQUEST_UNASSIGNED_ROLE_CHANGE',
+                object_type='CredentialRequest',
+                object_id=req.id,
+                previous_state={'assigned_staff': user.username},
+                new_state={'assigned_staff': None}
+            )
 
     @staticmethod
     @transaction.atomic
@@ -181,6 +225,7 @@ class AccountService:
             previous_state=previous_state,
             new_state={'is_active': False}
         )
+        AccountService._unassign_orphaned_requests_for_user(actor, user)
         return user
 
 

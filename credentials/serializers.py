@@ -617,9 +617,20 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     def validate_credential_type(self, value):
         if not value.is_active:
             raise serializers.ValidationError(
-                "Cannot request an inactive credential type."
+                f"The requested credential '{value.name}' is currently unavailable."
             )
         return value
+
+    def validate_assigned_staff(self, value):
+        if value:
+            if value.role != Role.STAFF or not value.is_active:
+                raise serializers.ValidationError(
+                    "Only active staff members can be assigned to requests."
+                )
+        return value
+
+    def validate_assigned_to(self, value):
+        return self.validate_assigned_staff(value)
 
     def validate(self, attrs):
         copies_val = attrs.pop('copies', None)
@@ -848,12 +859,16 @@ class PaymentSerializer(serializers.ModelSerializer):
     """
     Representation of a Payment.
     """
+    or_number = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
+
     class Meta:
         model = Payment
         fields = [
             'id', 'request', 'amount', 'receipt_reference_number',
-            'receipt_image', 'status', 'remarks', 'verified_by', 'verified_at',
-            'uploaded_at', 'updated_at'
+            'or_number', 'receipt_image', 'status', 'remarks', 'verified_by',
+            'verified_at', 'uploaded_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'status', 'remarks', 'verified_by', 'verified_at',
@@ -865,6 +880,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             data = data.copy()
         elif isinstance(data, dict):
             data = data.copy()
+
+        if isinstance(data, dict):
+            if data.get('or_number') and not data.get('receipt_reference_number'):
+                data['receipt_reference_number'] = data.get('or_number')
 
         amount_val = data.get('amount') if isinstance(data, dict) else None
         if amount_val is not None:
@@ -917,7 +936,7 @@ class PaymentSerializer(serializers.ModelSerializer):
                     }
                 )
 
-        receipt_ref = data.get('receipt_reference_number')
+        receipt_ref = data.get('receipt_reference_number') or data.get('or_number')
         if receipt_ref and str(receipt_ref).strip():
             ref_clean = str(receipt_ref).strip()
             existing_payment = Payment.objects.filter(
@@ -926,12 +945,14 @@ class PaymentSerializer(serializers.ModelSerializer):
             if self.instance:
                 existing_payment = existing_payment.exclude(pk=self.instance.pk)
             if existing_payment.exists():
+                err_msg = "This Official Receipt (O.R.) number is already in use."
                 raise serializers.ValidationError(
                     {
-                        'receipt_reference_number': (
+                        'or_number': [err_msg],
+                        'receipt_reference_number': [
                             f"Receipt / O.R. reference number '{ref_clean}' has "
                             "already been used for another payment."
-                        )
+                        ]
                     }
                 )
 

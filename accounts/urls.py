@@ -12,6 +12,7 @@ router.register(r'users', UserViewSet, basename='user')
 
 urlpatterns = [
     path('users/me/', CurrentUserView.as_view(), name='current-user'),
+    path('auth/me/', CurrentUserView.as_view(), name='current-user-auth'),
     path(
         'users/staff-directory/',
         StaffDirectoryView.as_view(),
