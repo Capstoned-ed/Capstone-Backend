@@ -10,6 +10,7 @@ from rest_framework.test import APITestCase
 
 from accounts.models import Role
 from accounts.services import AccountService
+from audit.models import AuditLog
 from credentials.models import (
     ClearanceStatus,
     CredentialRequest,
@@ -363,3 +364,128 @@ class QAHardeningFixesTests(APITestCase):
         open_req.refresh_from_db()
         self.assertIsNone(open_req.assigned_staff)
         self.assertFalse(open_req.in_process_queue)
+
+    def test_edge_06_copy_count_upper_bound_validation(self):
+        """
+        TC-EDGE-06: Request creation with copy count exceeding bounds
+        (e.g. copies > 100 or copies < 1) must return 400 Bad Request.
+        """
+        self.client.force_authenticate(user=self.student)
+        url = reverse('credentialrequest-list')
+
+        # 1. Copies exceeding 100
+        resp_too_high = self.client.post(
+            url,
+            {
+                'credential_type': self.cred_type.id,
+                'purpose': 'Employment',
+                'copies': 999999,
+            },
+            format='json'
+        )
+        self.assertEqual(resp_too_high.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('copies', resp_too_high.data)
+
+        # 2. Copies less than 1
+        resp_zero = self.client.post(
+            url,
+            {
+                'credential_type': self.cred_type.id,
+                'purpose': 'Employment',
+                'copies': 0,
+            },
+            format='json'
+        )
+        self.assertEqual(resp_zero.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('copies', resp_zero.data)
+
+        # 3. Multi-document items with copies exceeding 100
+        resp_items = self.client.post(
+            url,
+            {
+                'credential_type': self.cred_type.id,
+                'purpose': 'Employment',
+                'document_items': [
+                    {'credential_type_id': self.cred_type.id, 'copies': 150}
+                ],
+            },
+            format='json'
+        )
+        self.assertEqual(resp_items.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('document_items', resp_items.data)
+
+        # 4. Valid copies within bounds (1-100)
+        resp_valid = self.client.post(
+            url,
+            {
+                'credential_type': self.cred_type.id,
+                'purpose': 'Employment',
+                'copies': 5,
+            },
+            format='json'
+        )
+        self.assertEqual(resp_valid.status_code, status.HTTP_201_CREATED)
+
+    def test_edge_09_audit_log_deleted_user_not_misattributed_to_admin(self):
+        """
+        TC-EDGE-09: When an audit log actor is deleted (actor is None),
+        the audit log entry must NOT fall back to attributing the action to
+        the viewing admin. Instead, it must return 'Deleted User' or preserved
+        actor metadata.
+        """
+        temp_user = User.objects.create_user(
+            username='temp_staff',
+            password='password123',
+            email='temp_staff@test.com',
+            role=Role.STAFF
+        )
+        temp_id = temp_user.id
+
+        # 1. Audit log with metadata preserving username and id
+        log_with_meta = AuditLog.objects.create(
+            actor=temp_user,
+            action='CREDENTIAL_REQUEST_UPDATED',
+            object_type='CredentialRequest',
+            object_id='101',
+            metadata={
+                'actor_id': temp_id,
+                'actor_username': 'temp_staff'
+            }
+        )
+
+        # 2. Audit log without actor metadata
+        log_without_meta = AuditLog.objects.create(
+            actor=temp_user,
+            action='CREDENTIAL_REQUEST_UPDATED',
+            object_type='CredentialRequest',
+            object_id='102',
+            metadata={}
+        )
+
+        # Delete temp_user from DB -> actor FK becomes None
+        temp_user.delete()
+
+        log_with_meta.refresh_from_db()
+        log_without_meta.refresh_from_db()
+        self.assertIsNone(log_with_meta.actor)
+        self.assertIsNone(log_without_meta.actor)
+
+        # Admin requests audit logs
+        self.client.force_authenticate(user=self.admin)
+        url = reverse('audit-logs')
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        logs_data = {item['id']: item for item in resp.data}
+
+        # Verify log_with_meta preserved username
+        item_meta = logs_data[f"audit-{log_with_meta.id}"]
+        self.assertEqual(item_meta['actor'], 'temp_staff')
+        self.assertNotEqual(item_meta['actor'], self.admin.username)
+        self.assertEqual(item_meta['actorId'], str(temp_id))
+
+        # Verify log_without_meta defaults to 'Deleted User'
+        item_no_meta = logs_data[f"audit-{log_without_meta.id}"]
+        self.assertEqual(item_no_meta['actor'], 'Deleted User')
+        self.assertNotEqual(item_no_meta['actor'], self.admin.username)
+        self.assertEqual(item_no_meta['actorId'], 'deleted')

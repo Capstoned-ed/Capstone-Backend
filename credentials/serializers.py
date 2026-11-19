@@ -315,7 +315,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         max_length=20, required=False, write_only=True
     )
     copies = serializers.IntegerField(
-        required=False, min_value=1, max_value=99, write_only=True
+        required=False, min_value=1, max_value=100, write_only=True
     )
     document_items = serializers.ListField(
         child=serializers.DictField(), required=False, write_only=True
@@ -645,7 +645,25 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
                 if not isinstance(item, dict):
                     continue
                 ct = _resolve_credential_type_record(item)
-                copies = max(1, int(item.get('copies') or 1))
+                item_copies = item.get('copies')
+                if item_copies is not None:
+                    try:
+                        c_val = int(item_copies)
+                        if c_val < 1 or c_val > 100:
+                            raise serializers.ValidationError({
+                                'document_items': [
+                                    'Number of copies must be between 1 and 100.'
+                                ]
+                            })
+                        copies = c_val
+                    except (ValueError, TypeError):
+                        raise serializers.ValidationError({
+                            'document_items': [
+                                'Number of copies must be an integer between 1 and 100.'
+                            ]
+                        })
+                else:
+                    copies = 1
                 unit_price = (
                     _to_decimal(ct.price)
                     if ct
@@ -707,12 +725,16 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
                 p for p in [clean_rem, copies_tag, total_tag, items_tag] if p
             ).strip()
         else:
-            effective_copies = max(
-                1,
+            raw_copies = (
                 int(copies_val)
                 if copies_val is not None
-                else _extract_copies_from_remarks(remarks),
+                else _extract_copies_from_remarks(remarks)
             )
+            if raw_copies > 100:
+                raise serializers.ValidationError({
+                    'copies': ['Number of copies must be between 1 and 100.']
+                })
+            effective_copies = max(1, raw_copies)
             if copies_val is not None and not re.search(
                 r'\[Copies:\s*\d+', remarks, re.IGNORECASE
             ):

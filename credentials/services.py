@@ -208,6 +208,19 @@ class CredentialRequestService:
                 "a valid clearance before requesting a document."
             )
 
+        copies = validated_data.pop('copies', None)
+        if copies is not None:
+            try:
+                c_num = int(copies)
+                if c_num < 1 or c_num > 100:
+                    raise ValidationError(
+                        "Number of copies must be between 1 and 100."
+                    )
+            except (ValueError, TypeError):
+                raise ValidationError(
+                    "Number of copies must be between 1 and 100."
+                )
+
         validated_data['user'] = actor
         custom_doc_code = validated_data.pop('custom_doc_code', None)
         credential_request = CredentialRequest(**validated_data)

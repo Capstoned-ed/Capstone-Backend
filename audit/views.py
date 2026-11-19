@@ -63,10 +63,21 @@ def _format_audit_log(log, user):
     else:
         item_status = 'Recorded'
 
+    if user:
+        actor_name = (getattr(user, 'username', '') or '').lower()
+        actor_id = str(getattr(user, 'id', user))
+    else:
+        actor_name = (
+            meta.get('actor_username')
+            or meta.get('actor_name')
+            or 'Deleted User'
+        )
+        actor_id = str(meta.get('actor_id') or 'deleted')
+
     return {
         'id': f"audit-{log.id}",
-        'actor': (user.username or '').lower(),
-        'actorId': str(user.id),
+        'actor': actor_name,
+        'actorId': actor_id,
         'targetName': target_name,
         'targetId': target_id,
         'trackingNumber': target_id,
@@ -123,7 +134,7 @@ class AuditLogListView(APIView):
 
         logs = qs[:limit]
         data = [
-            _format_audit_log(log, log.actor or request.user)
+            _format_audit_log(log, log.actor)
             for log in logs
         ]
         return Response(data, status=status.HTTP_200_OK)
