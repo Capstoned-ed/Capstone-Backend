@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from drf_spectacular.utils import extend_schema
-from accounts.models import Role
-from .models import Notification, NotificationEvent
+
 from .serializers import NotificationSerializer
+from .selectors import get_user_notifications
+from .services import NotificationService
 
 
 class NotificationPagination(PageNumberPagination):
@@ -25,21 +26,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = NotificationPagination
 
     def get_queryset(self):
-        # Prevent crash during OpenAPI schema generation with AnonymousUser
-        if not getattr(self.request.user, 'is_authenticated', False):
-            return Notification.objects.none()
-
-        # Strict data isolation: Users can only see their own notifications
-        qs = Notification.objects.filter(user=self.request.user)
-        if getattr(self.request.user, 'role', None) == Role.ADMIN:
-            qs = qs.exclude(
-                event_type__in=[
-                    NotificationEvent.REQUEST_CREATED,
-                    NotificationEvent.CLEARANCE_SUBMITTED,
-                    NotificationEvent.PAYMENT_SUBMITTED,
-                ]
-            )
-        return qs
+        return get_user_notifications(self.request.user)
 
     @extend_schema(responses={200: NotificationSerializer})
     @action(detail=True, methods=['patch'], url_path='read')
@@ -48,10 +35,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         Mark a single notification as read.
         """
         notification = self.get_object()
-        if not notification.is_read:
-            notification.is_read = True
-            notification.save(update_fields=['is_read'])
-        return Response(NotificationSerializer(notification).data)
+        updated = NotificationService.mark_as_read(notification)
+        return Response(NotificationSerializer(updated).data)
 
     @extend_schema(responses={200: dict})
     @action(detail=False, methods=['post'], url_path='mark_all_read')
@@ -59,8 +44,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Mark all unread notifications for the current user as read.
         """
-        qs = self.get_queryset().filter(is_read=False)
-        count = qs.update(is_read=True)
+        count = NotificationService.mark_all_as_read(request.user)
         return Response(
             {"status": "success", "updated_count": count},
             status=status.HTTP_200_OK

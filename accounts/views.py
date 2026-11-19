@@ -1,30 +1,27 @@
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
-from rest_framework.throttling import AnonRateThrottle
-from drf_spectacular.utils import extend_schema
-from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from drf_spectacular.utils import extend_schema
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .permissions import IsAdminRole, IsStaffOrAdmin
+from .selectors import list_active_staff_directory, list_users_for_admin
 from .serializers import (
+    ChangePasswordSerializer,
     CustomTokenObtainPairSerializer,
-    UserSerializer,
-    UserCreateSerializer,
-    UserUpdateSerializer,
-    SelfProfileUpdateSerializer,
+    PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     PasswordResetVerifySerializer,
-    PasswordResetConfirmSerializer,
-    ChangePasswordSerializer,
+    SelfProfileUpdateSerializer,
+    UserCreateSerializer,
+    UserSerializer,
+    UserUpdateSerializer,
 )
-from .permissions import IsAdminRole, IsStaffOrAdmin
-from .models import Role
 from .services import AccountService, PasswordResetService
-
-User = get_user_model()
 
 
 class CurrentUserView(APIView):
@@ -41,11 +38,7 @@ class CurrentUserView(APIView):
 
     @extend_schema(responses={200: UserSerializer})
     def patch(self, request, *args, **kwargs):
-        user = request.user
-        for field in ['first_name', 'last_name', 'email']:
-            if field in request.data:
-                setattr(user, field, request.data[field])
-        user.save()
+        user = AccountService.update_user_profile(request.user, request.data)
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
@@ -59,10 +52,7 @@ class StaffDirectoryView(APIView):
 
     @extend_schema(responses={200: UserSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        qs = User.objects.filter(
-            is_active=True,
-            role__in=[Role.STAFF, Role.REGISTRAR, Role.ADMIN]
-        ).order_by('role', 'last_name', 'first_name')
+        qs = list_active_staff_directory()
         serializer = UserSerializer(qs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -84,10 +74,7 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get_queryset(self):
-        qs = User.objects.all().order_by('-date_joined')
-        if self.request.user.is_authenticated and not self.request.user.is_superuser:
-            qs = qs.filter(is_superuser=False)
-        return qs
+        return list_users_for_admin(self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -119,7 +106,11 @@ class UserViewSet(viewsets.ModelViewSet):
             req_role = request.data.get('role')
             if req_role and req_role != instance.role:
                 return Response(
-                    {"detail": "You cannot change your own administrative role."},
+                    {
+                        "detail": (
+                            "You cannot change your own administrative role."
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
             if 'is_active' in request.data and not request.data['is_active']:
@@ -132,7 +123,9 @@ class UserViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial
+        )
         serializer.is_valid(raise_exception=True)
 
         user = AccountService.update_user(
@@ -150,7 +143,11 @@ class UserViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if str(instance.id) == str(request.user.id):
             return Response(
-                {"detail": "You cannot deactivate your own administrative account."},
+                {
+                    "detail": (
+                        "You cannot deactivate your own administrative account."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
         AccountService.deactivate_user(
@@ -226,8 +223,9 @@ class PasswordResetVerifyView(APIView):
                 status=status.HTTP_200_OK
             )
         except DjangoValidationError as exc:
+            msg = exc.message if hasattr(exc, 'message') else str(exc)
             return Response(
-                {"detail": str(exc.message if hasattr(exc, 'message') else exc)},
+                {"detail": msg},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -257,8 +255,9 @@ class PasswordResetConfirmView(APIView):
                 status=status.HTTP_200_OK
             )
         except DjangoValidationError as exc:
+            msg = exc.message if hasattr(exc, 'message') else str(exc)
             return Response(
-                {"detail": str(exc.message if hasattr(exc, 'message') else exc)},
+                {"detail": msg},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

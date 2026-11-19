@@ -1,63 +1,58 @@
-from rest_framework import viewsets, status
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
-from rest_framework.response import Response
-from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from pathlib import Path
-from django.contrib.auth import get_user_model
-from django.db import models
+
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
-from audit.services import AuditService
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .models import (
-    CredentialType,
-    CredentialRequest,
-    RequirementDocument,
-    StudentClearance,
-    Payment,
-    RegistrarSettings
-)
-from .serializers import (
-    CredentialTypeSerializer,
-    CredentialTypeCreateUpdateSerializer,
-    CredentialRequestSerializer,
-    RequirementDocumentSerializer,
-    StudentClearanceSerializer,
-    StudentClearanceSubmitSerializer,
-    StudentClearanceReviewSerializer,
-    PaymentSerializer,
-    RegistrarSettingsSerializer
-)
+from accounts.models import Role
+from .ml_client import MLClient
+from .models import CredentialType
 from .permissions import (
-    IsAdminOrRegistrarOrReadOnly,
     CredentialRequestPermission,
+    IsAdminOrRegistrarOrReadOnly,
+    PaymentPermission,
     RequirementDocumentPermission,
     StudentClearancePermission,
-    PaymentPermission
+)
+from .selectors import (
+    get_credential_request_by_id_or_tracking,
+    get_registrar_settings,
+    list_credential_requests,
+    list_credential_types,
+    list_payments,
+    list_requirement_documents,
+    list_student_clearances,
+)
+from .serializers import (
+    CredentialRequestSerializer,
+    CredentialTypeCreateUpdateSerializer,
+    CredentialTypeSerializer,
+    PaymentSerializer,
+    RegistrarSettingsSerializer,
+    RequirementDocumentSerializer,
+    StudentClearanceReviewSerializer,
+    StudentClearanceSerializer,
+    StudentClearanceSubmitSerializer,
 )
 from .services import (
-    CredentialTypeService,
     CredentialRequestService,
+    CredentialTypeService,
+    PaymentService,
+    RegistrarSettingsService,
     RequirementDocumentService,
     StudentClearanceService,
-    PaymentService
 )
-from accounts.models import Role
-from notifications.services import NotificationService
-from notifications.models import NotificationEvent
-from .ml_client import MLClient
-
-User = get_user_model()
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing credential types.
     """
-    # Base queryset for router URL introspection; actual filtering in get_queryset().
     queryset = CredentialType.objects.all().order_by('name')
     permission_classes = [IsAdminOrRegistrarOrReadOnly]
 
@@ -67,13 +62,7 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
         return CredentialTypeSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-
-        if user.is_authenticated and user.role not in [Role.ADMIN, Role.REGISTRAR]:
-            return qs.filter(is_active=True)
-
-        return qs
+        return list_credential_types(self.request.user)
 
     @extend_schema(responses={201: CredentialTypeSerializer})
     def create(self, request, *args, **kwargs):
@@ -94,7 +83,9 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial
+        )
         serializer.is_valid(raise_exception=True)
 
         credential_type = CredentialTypeService.update_type(
@@ -126,96 +117,16 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
-        qs = CredentialRequest.objects.select_related(
-            'user', 'credential_type', 'assigned_staff'
-        ).prefetch_related(
-            'payments',
-            'documents'
-        ).order_by('-created_at')
-
-        status_param = self.request.query_params.get('status')
-        if status_param:
-            qs = qs.filter(status=status_param)
-
-        assigned_param = (
-            self.request.query_params.get('assigned_to') or
-            self.request.query_params.get('assigned_staff')
+        return list_credential_requests(
+            self.request.user, self.request.query_params
         )
-        assigned_only = self.request.query_params.get('assigned_only')
-
-        user = self.request.user
-
-        if assigned_param:
-            raw_target = str(assigned_param).strip()
-            if raw_target.lower() == 'me' and user.is_authenticated:
-                target_user = user
-            else:
-                target_user = User.objects.filter(
-                    models.Q(username__iexact=raw_target) |
-                    models.Q(
-                        id=int(raw_target) if raw_target.isdigit() else -1
-                    )
-                ).first()
-                if not target_user and ' ' in raw_target:
-                    parts = raw_target.split(None, 1)
-                    target_user = User.objects.filter(
-                        first_name__iexact=parts[0],
-                        last_name__iexact=parts[1]
-                    ).first()
-                if not target_user:
-                    target_user = User.objects.filter(
-                        models.Q(first_name__iexact=raw_target) |
-                        models.Q(last_name__iexact=raw_target) |
-                        models.Q(email__iexact=raw_target)
-                    ).first()
-
-            if target_user:
-                assigned_q = (
-                    models.Q(assigned_staff=target_user) |
-                    models.Q(
-                        remarks__icontains=f"Assigned to: {target_user.username}"
-                    )
-                )
-                target_full_name = (
-                    f"{getattr(target_user, 'first_name', '')} "
-                    f"{getattr(target_user, 'last_name', '')}"
-                ).strip()
-                if target_full_name:
-                    assigned_q |= models.Q(
-                        remarks__icontains=f"Assigned to: {target_full_name}"
-                    )
-                qs = qs.filter(assigned_q)
-            else:
-                qs = qs.none()
-        elif assigned_only == 'true' and user.is_authenticated:
-            qs = qs.filter(
-                models.Q(assigned_staff=user) |
-                models.Q(remarks__icontains=f"Assigned to: {user.username}")
-            )
-
-        if user.is_authenticated and user.role == Role.STUDENT:
-            return qs.filter(user=user)
-
-        return qs
 
     def get_object(self):
         queryset = self.filter_queryset(self.get_queryset())
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = str(self.kwargs[lookup_url_kwarg]).strip()
 
-        # 1. Attempt lookup by UUID pk
-        try:
-            import uuid
-            uuid_val = uuid.UUID(lookup_value)
-            obj = queryset.filter(pk=uuid_val).first()
-            if obj:
-                self.check_object_permissions(self.request, obj)
-                return obj
-        except (ValueError, TypeError, AttributeError):
-            pass
-
-        # 2. Attempt lookup by tracking_number
-        obj = queryset.filter(tracking_number__iexact=lookup_value).first()
+        obj = get_credential_request_by_id_or_tracking(lookup_value, queryset)
         if obj:
             self.check_object_permissions(self.request, obj)
             return obj
@@ -252,82 +163,18 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch', 'post'])
     def assign(self, request, pk=None):
         credential_request = self.get_object()
-        if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
-            return Response(
-                {"detail": "You do not have permission to assign requests."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         target_staff_identifier = (
             request.data.get('assigned_staff') or
             request.user.username
         )
-        staff_user = None
-        if target_staff_identifier:
-            raw_target = str(target_staff_identifier).strip()
-            staff_user = User.objects.filter(
-                models.Q(username__iexact=raw_target) |
-                models.Q(
-                    id=int(raw_target) if raw_target.isdigit() else -1
-                )
-            ).first()
-            if not staff_user and ' ' in raw_target:
-                parts = raw_target.split(None, 1)
-                staff_user = User.objects.filter(
-                    first_name__iexact=parts[0],
-                    last_name__iexact=parts[1]
-                ).first()
-            if not staff_user:
-                staff_user = User.objects.filter(
-                    models.Q(first_name__iexact=raw_target) |
-                    models.Q(last_name__iexact=raw_target) |
-                    models.Q(email__iexact=raw_target)
-                ).first()
-        if not staff_user:
-            staff_user = request.user
-
-        credential_request.assigned_staff = staff_user
-        credential_request.in_process_queue = True
-
-        import re
-        staff_display = staff_user.username or 'Staff'
-        clean_rem = re.sub(
-            r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '',
-            credential_request.remarks or ''
-        ).strip()
-        new_rem = f"{clean_rem} | [Assigned to: {staff_display}]".strip(' |')
-        credential_request.remarks = new_rem
-        credential_request.save()
-
-        from audit.services import AuditService
-        AuditService.log_action(
+        updated_request = CredentialRequestService.assign_request(
             actor=request.user,
-            action='REQUEST_ASSIGNED',
-            object_type='CredentialRequest',
-            object_id=credential_request.id,
-            previous_state=None,
-            new_state={
-                'assigned_staff': staff_user.username,
-                'in_process_queue': True,
-                'remarks': credential_request.remarks
-            }
+            credential_request=credential_request,
+            target_staff_identifier=target_staff_identifier
         )
-
-        if staff_user != request.user:
-            NotificationService.create_notification(
-                recipient=staff_user,
-                event_type=NotificationEvent.REQUEST_ASSIGNED,
-                message=(
-                    f"Request {credential_request.tracking_number} has been assigned "
-                    f"to you by {request.user.username}."
-                ),
-                related_object_type='CredentialRequest',
-                related_object_id=str(credential_request.id)
-            )
-
         return Response(
             CredentialRequestSerializer(
-                credential_request, context={'request': request}
+                updated_request, context={'request': request}
             ).data,
             status=status.HTTP_200_OK
         )
@@ -418,15 +265,7 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
-        qs = RequirementDocument.objects.select_related(
-            'request__user'
-        ).order_by('-uploaded_at')
-        user = self.request.user
-
-        if user.is_authenticated and user.role == Role.STUDENT:
-            return qs.filter(request__user=user)
-
-        return qs
+        return list_requirement_documents(self.request.user)
 
     @extend_schema(responses={201: RequirementDocumentSerializer})
     def create(self, request, *args, **kwargs):
@@ -447,7 +286,10 @@ class RequirementDocumentViewSet(viewsets.ModelViewSet):
     def download(self, request, pk=None):
         document = self.get_object()
 
-        if not document.file or not document.file.storage.exists(document.file.name):
+        if (
+            not document.file
+            or not document.file.storage.exists(document.file.name)
+        ):
             return Response(
                 {"detail": "Document file not found."},
                 status=status.HTTP_404_NOT_FOUND
@@ -478,13 +320,7 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
-        qs = StudentClearance.objects.select_related('user').order_by('-updated_at')
-        user = self.request.user
-
-        if user.is_authenticated and user.role == Role.STUDENT:
-            return qs.filter(user=user)
-
-        return qs
+        return list_student_clearances(self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -513,7 +349,9 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'])
     def review(self, request, pk=None):
         clearance = self.get_object()
-        serializer = self.get_serializer(clearance, data=request.data, partial=True)
+        serializer = self.get_serializer(
+            clearance, data=request.data, partial=True
+        )
         serializer.is_valid(raise_exception=True)
 
         updated_clearance = StudentClearanceService.review_clearance(
@@ -533,10 +371,16 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
         clearance = self.get_object()
 
         # Strict Ownership Check for Download
-        if request.user.role == Role.STUDENT and clearance.user != request.user:
+        if (
+            getattr(request.user, 'role', None) == Role.STUDENT
+            and clearance.user != request.user
+        ):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        if not clearance.file or not clearance.file.storage.exists(clearance.file.name):
+        if (
+            not clearance.file
+            or not clearance.file.storage.exists(clearance.file.name)
+        ):
             return Response(
                 {"detail": "File not found."},
                 status=status.HTTP_404_NOT_FOUND
@@ -568,15 +412,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        qs = Payment.objects.select_related(
-            'request__user'
-        ).order_by('-uploaded_at')
-        user = self.request.user
-
-        if user.is_authenticated and user.role == Role.STUDENT:
-            return qs.filter(request__user=user)
-
-        return qs
+        return list_payments(self.request.user)
 
     @extend_schema(responses={201: PaymentSerializer})
     def create(self, request, *args, **kwargs):
@@ -584,7 +420,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         req = serializer.validated_data['request']
-        if request.user.role == Role.STUDENT and req.user != request.user:
+        if (
+            getattr(request.user, 'role', None) == Role.STUDENT
+            and req.user != request.user
+        ):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
         payment = PaymentService.submit_payment(
@@ -593,7 +432,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
             amount=serializer.validated_data['amount'],
             receipt_image=serializer.validated_data['receipt_image'],
             receipt_reference_number=serializer.validated_data.get(
-                'receipt_reference_number', '')
+                'receipt_reference_number', ''
+            )
         )
         headers = self.get_success_headers(serializer.data)
         return Response(
@@ -606,8 +446,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def download(self, request, pk=None):
         payment = self.get_object()
 
-        if not payment.receipt_image or not payment.receipt_image.storage.exists(
-            payment.receipt_image.name
+        if (
+            not payment.receipt_image
+            or not payment.receipt_image.storage.exists(
+                payment.receipt_image.name
+            )
         ):
             return Response(
                 {"detail": "Receipt file not found."},
@@ -643,7 +486,9 @@ class PaymentViewSet(viewsets.ModelViewSet):
         )
 
         return Response(
-            PaymentSerializer(updated_payment, context={'request': request}).data
+            PaymentSerializer(
+                updated_payment, context={'request': request}
+            ).data
         )
 
     def update(self, request, *args, **kwargs):
@@ -717,7 +562,9 @@ class AdminDailyForecastView(APIView):
         start_date = request.query_params.get('start_date')
         if not start_date:
             from datetime import datetime, timedelta
-            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            start_date = (
+                datetime.now() + timedelta(days=1)
+            ).strftime('%Y-%m-%d')
 
         op_days = int(request.query_params.get('operating_days', 20))
         res = MLClient.forecast_daily_demand(
@@ -740,7 +587,9 @@ class AdminDailyForecastView(APIView):
         start_date = request.data.get('start_date')
         if not start_date:
             from datetime import datetime, timedelta
-            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            start_date = (
+                datetime.now() + timedelta(days=1)
+            ).strftime('%Y-%m-%d')
 
         op_days = int(request.data.get('operating_days', 20))
         res = MLClient.forecast_daily_demand(
@@ -809,7 +658,7 @@ class RegistrarApprovalSettingsView(APIView):
 
     @extend_schema(responses={200: RegistrarSettingsSerializer})
     def get(self, request):
-        settings_obj = RegistrarSettings.get_settings()
+        settings_obj = get_registrar_settings()
         serializer = RegistrarSettingsSerializer(
             settings_obj, context={'request': request}
         )
@@ -820,55 +669,10 @@ class RegistrarApprovalSettingsView(APIView):
         responses={200: RegistrarSettingsSerializer}
     )
     def patch(self, request):
-        if request.user.role not in [Role.REGISTRAR, Role.ADMIN]:
-            raise PermissionDenied(
-                "Only Registrar or Admin can modify approval settings."
-            )
-
-        settings_obj = RegistrarSettings.get_settings()
-        prev_val = settings_obj.auto_approve_requests
-        auto_approve = request.data.get('auto_approve_requests')
-        if auto_approve is None:
-            auto_approve = request.data.get('auto_approve')
-
-        if auto_approve is not None:
-            if isinstance(auto_approve, str):
-                settings_obj.auto_approve_requests = auto_approve.lower() in [
-                    'true', '1', 'yes'
-                ]
-            else:
-                settings_obj.auto_approve_requests = bool(auto_approve)
-
-        if 'default_signatory_name' in request.data:
-            settings_obj.default_signatory_name = str(
-                request.data['default_signatory_name']
-            ).strip()
-        elif request.user.role == Role.REGISTRAR:
-            full_name = (
-                f"{request.user.first_name} {request.user.last_name}".strip()
-            )
-            actor_name = full_name or request.user.username
-            if actor_name:
-                settings_obj.default_signatory_name = actor_name
-        if 'default_signatory_title' in request.data:
-            settings_obj.default_signatory_title = str(
-                request.data['default_signatory_title']
-            ).strip()
-
-        settings_obj.updated_by = request.user
-        settings_obj.save()
-
-        AuditService.log_action(
+        settings_obj = RegistrarSettingsService.update_registrar_settings(
             actor=request.user,
-            action='REGISTRAR_SETTINGS_UPDATED',
-            object_type='RegistrarSettings',
-            object_id=settings_obj.id,
-            previous_state={'auto_approve_requests': prev_val},
-            new_state={
-                'auto_approve_requests': settings_obj.auto_approve_requests
-            }
+            data=request.data
         )
-
         serializer = RegistrarSettingsSerializer(
             settings_obj, context={'request': request}
         )

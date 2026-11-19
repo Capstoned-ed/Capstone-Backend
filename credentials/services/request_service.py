@@ -1,105 +1,24 @@
+import re
 from django.contrib.auth import get_user_model
-from django.db import transaction, models
+from django.db import models, transaction
+from django.utils import timezone
+from rest_framework.exceptions import PermissionDenied, ValidationError
+
+from accounts.models import Role
 from audit.services import AuditService
-from notifications.services import NotificationService
 from notifications.models import NotificationEvent
-from .models import (
-    CredentialType,
-    CredentialRequest,
-    RequirementDocument,
-    StudentClearance,
+from notifications.services import NotificationService
+from ..models import (
     ClearanceStatus,
-    RequestStatus,
+    CredentialRequest,
     Payment,
     PaymentStatus,
-    RegistrarSettings
+    RegistrarSettings,
+    RequestStatus,
+    StudentClearance,
 )
-from rest_framework.exceptions import ValidationError, PermissionDenied
-from django.utils import timezone
-from accounts.models import Role
 
 User = get_user_model()
-
-
-class CredentialTypeService:
-    @staticmethod
-    @transaction.atomic
-    def create_type(actor, validated_data):
-        credential_type = CredentialType.objects.create(**validated_data)
-
-        AuditService.log_action(
-            actor=actor,
-            action='CREDENTIAL_TYPE_CREATED',
-            object_type='CredentialType',
-            object_id=credential_type.id,
-            previous_state=None,
-            new_state={
-                'code': credential_type.code,
-                'doc_code': credential_type.doc_code,
-                'name': credential_type.name,
-                'price': str(credential_type.price),
-                'processing_days': credential_type.processing_days,
-                'is_active': credential_type.is_active
-            }
-        )
-        return credential_type
-
-    @staticmethod
-    @transaction.atomic
-    def update_type(actor, credential_type, validated_data):
-        previous_state = {
-            'code': credential_type.code,
-            'doc_code': credential_type.doc_code,
-            'name': credential_type.name,
-            'description': credential_type.description,
-            'price': str(credential_type.price),
-            'processing_days': credential_type.processing_days,
-            'is_active': credential_type.is_active
-        }
-
-        for attr, value in validated_data.items():
-            setattr(credential_type, attr, value)
-
-        credential_type.save()
-
-        new_state = {
-            'code': credential_type.code,
-            'doc_code': credential_type.doc_code,
-            'name': credential_type.name,
-            'description': credential_type.description,
-            'price': str(credential_type.price),
-            'processing_days': credential_type.processing_days,
-            'is_active': credential_type.is_active
-        }
-
-        if previous_state != new_state:
-            AuditService.log_action(
-                actor=actor,
-                action='CREDENTIAL_TYPE_UPDATED',
-                object_type='CredentialType',
-                object_id=credential_type.id,
-                previous_state=previous_state,
-                new_state=new_state
-            )
-
-        return credential_type
-
-    @staticmethod
-    @transaction.atomic
-    def deactivate_type(actor, credential_type):
-        previous_state = {'is_active': credential_type.is_active}
-        credential_type.is_active = False
-        credential_type.save(update_fields=['is_active'])
-
-        AuditService.log_action(
-            actor=actor,
-            action='CREDENTIAL_TYPE_DEACTIVATED',
-            object_type='CredentialType',
-            object_id=credential_type.id,
-            previous_state=previous_state,
-            new_state={'is_active': False}
-        )
-        return credential_type
 
 
 class CredentialRequestService:
@@ -281,6 +200,83 @@ class CredentialRequestService:
 
     @staticmethod
     @transaction.atomic
+    def assign_request(actor, credential_request, target_staff_identifier):
+        if actor.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
+            raise PermissionDenied(
+                "You do not have permission to assign requests."
+            )
+
+        credential_request = (
+            CredentialRequest.objects
+            .select_for_update()
+            .get(pk=credential_request.pk)
+        )
+
+        staff_user = None
+        if target_staff_identifier:
+            raw_target = str(target_staff_identifier).strip()
+            staff_user = User.objects.filter(
+                models.Q(username__iexact=raw_target) |
+                models.Q(
+                    id=int(raw_target) if raw_target.isdigit() else -1
+                )
+            ).first()
+            if not staff_user and ' ' in raw_target:
+                parts = raw_target.split(None, 1)
+                staff_user = User.objects.filter(
+                    first_name__iexact=parts[0],
+                    last_name__iexact=parts[1]
+                ).first()
+            if not staff_user:
+                staff_user = User.objects.filter(
+                    models.Q(first_name__iexact=raw_target) |
+                    models.Q(last_name__iexact=raw_target) |
+                    models.Q(email__iexact=raw_target)
+                ).first()
+        if not staff_user:
+            staff_user = actor
+
+        credential_request.assigned_staff = staff_user
+        credential_request.in_process_queue = True
+
+        staff_display = staff_user.username or 'Staff'
+        clean_rem = re.sub(
+            r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '',
+            credential_request.remarks or ''
+        ).strip()
+        new_rem = f"{clean_rem} | [Assigned to: {staff_display}]".strip(' |')
+        credential_request.remarks = new_rem
+        credential_request.save()
+
+        AuditService.log_action(
+            actor=actor,
+            action='REQUEST_ASSIGNED',
+            object_type='CredentialRequest',
+            object_id=credential_request.id,
+            previous_state=None,
+            new_state={
+                'assigned_staff': staff_user.username,
+                'in_process_queue': True,
+                'remarks': credential_request.remarks
+            }
+        )
+
+        if staff_user != actor:
+            NotificationService.create_notification(
+                recipient=staff_user,
+                event_type=NotificationEvent.REQUEST_ASSIGNED,
+                message=(
+                    f"Request {credential_request.tracking_number} has been assigned "
+                    f"to you by {actor.username}."
+                ),
+                related_object_type='CredentialRequest',
+                related_object_id=str(credential_request.id)
+            )
+
+        return credential_request
+
+    @staticmethod
+    @transaction.atomic
     def transition_request(
         actor, credential_request, new_status, remarks="",
         assigned_staff=None, in_process_queue=None
@@ -349,7 +345,10 @@ class CredentialRequestService:
             new_assigned_user = None
             if isinstance(assigned_staff, User):
                 new_assigned_user = assigned_staff
-            elif isinstance(assigned_staff, (str, int)) and str(assigned_staff).strip():
+            elif (
+                isinstance(assigned_staff, (str, int)) and
+                str(assigned_staff).strip()
+            ):
                 s_ident = str(assigned_staff).strip()
                 s_user = User.objects.filter(
                     models.Q(username__iexact=s_ident) |
@@ -384,7 +383,6 @@ class CredentialRequestService:
             credential_request.in_process_queue = bool(in_process_queue)
 
         def _preserve_metadata_tags(existing_text, new_text):
-            import re
             existing = str(existing_text or '')
             updated = str(new_text or '').strip()
             tags_to_keep = []
@@ -438,7 +436,9 @@ class CredentialRequestService:
             current_status, [])
 
         transition = next(
-            (t for t in allowed_transitions if t['status'] == canonical_status), None)
+            (t for t in allowed_transitions if t['status'] == canonical_status),
+            None
+        )
 
         # Allow Registrar to return a request from PROCESSING / READY_FOR_RELEASE
         # back to Staff (PAYMENT_VERIFIED) without altering Staff's matrix.
@@ -457,7 +457,8 @@ class CredentialRequestService:
 
         if not transition:
             raise ValidationError(
-                f"Invalid transition from {current_status} to {canonical_status}.")
+                f"Invalid transition from {current_status} to {canonical_status}."
+            )
 
         # Admins have strictly read-only access to request status processing
         if actor.role == Role.ADMIN:
@@ -722,351 +723,3 @@ class CredentialRequestService:
 
         return credential_request
 
-
-class RequirementDocumentService:
-    @staticmethod
-    @transaction.atomic
-    def upload_document(actor, validated_data):
-        credential_request = validated_data['request']
-
-        if actor.role == Role.STUDENT and credential_request.user != actor:
-            raise PermissionDenied(
-                "You can only upload documents to your own credential requests."
-            )
-
-        document = RequirementDocument.objects.create(**validated_data)
-
-        AuditService.log_action(
-            actor=actor,
-            action='DOCUMENT_UPLOADED',
-            object_type='RequirementDocument',
-            object_id=document.id,
-            previous_state=None,
-            new_state={
-                'request': str(document.request.id),
-                'document_type': document.document_type,
-                'file_name': document.file.name
-            }
-        )
-        return document
-
-
-class StudentClearanceService:
-    @staticmethod
-    @transaction.atomic
-    def submit_clearance(actor, file, credential_request=None):
-        if credential_request:
-            clearance = StudentClearance.objects.filter(
-                user=actor, credential_request=credential_request
-            ).first()
-        else:
-            clearance = StudentClearance.objects.filter(
-                user=actor, credential_request__isnull=True
-            ).first()
-
-        if clearance:
-            if clearance.status == ClearanceStatus.APPROVED:
-                raise ValidationError(
-                    "You cannot re-submit an already approved clearance."
-                )
-            clearance.file = file
-            clearance.status = ClearanceStatus.PENDING
-            clearance.save()
-        else:
-            clearance = StudentClearance.objects.create(
-                user=actor,
-                credential_request=credential_request,
-                file=file,
-                status=ClearanceStatus.PENDING
-            )
-
-        AuditService.log_action(
-            actor=actor,
-            action='CLEARANCE_SUBMITTED',
-            object_type='StudentClearance',
-            object_id=clearance.id,
-            previous_state=None,
-            new_state={
-                'user': str(actor.id),
-                'status': clearance.status,
-                'file_name': clearance.file.name
-            }
-        )
-
-        active_requests = CredentialRequest.objects.filter(
-            user=actor
-        ).exclude(
-            status__in=[
-                RequestStatus.RELEASED,
-                RequestStatus.REJECTED,
-                RequestStatus.CANCELLED
-            ]
-        )
-        notified_staff = set()
-        for req in active_requests:
-            if (
-                req.assigned_staff and
-                req.assigned_staff not in notified_staff and
-                req.assigned_staff != actor
-            ):
-                NotificationService.create_notification(
-                    recipient=req.assigned_staff,
-                    event_type=NotificationEvent.CLEARANCE_SUBMITTED,
-                    message=(
-                        f"Student clearance uploaded by {actor.username} "
-                        f"for request {req.tracking_number}."
-                    ),
-                    related_object_type='StudentClearance',
-                    related_object_id=str(clearance.id)
-                )
-                notified_staff.add(req.assigned_staff)
-
-        if not notified_staff:
-            registrars = User.objects.filter(
-                role=Role.REGISTRAR, is_active=True
-            )
-            for reg_user in registrars:
-                if reg_user != actor:
-                    NotificationService.create_notification(
-                        recipient=reg_user,
-                        event_type=NotificationEvent.CLEARANCE_SUBMITTED,
-                        message=f"Student clearance uploaded by {actor.username}.",
-                        related_object_type='StudentClearance',
-                        related_object_id=str(clearance.id)
-                    )
-
-        return clearance
-
-    @staticmethod
-    @transaction.atomic
-    def review_clearance(actor, clearance, status, remarks=""):
-        norm_status = str(status).strip().upper() if status else ''
-        if norm_status in ['VERIFIED', 'APPROVED', ClearanceStatus.APPROVED]:
-            canonical_status = ClearanceStatus.APPROVED
-        elif norm_status in ['REJECTED', 'NOT_VERIFIED', ClearanceStatus.REJECTED]:
-            canonical_status = ClearanceStatus.REJECTED
-        elif norm_status in ['PENDING', 'RESET', ClearanceStatus.PENDING]:
-            canonical_status = ClearanceStatus.PENDING
-        else:
-            raise ValidationError("Invalid clearance status.")
-
-        # Idempotent review: If status is already canonical_status, succeed
-        if clearance.status == canonical_status:
-            clearance.reviewed_by = actor
-            clearance.reviewed_at = timezone.now()
-            if remarks:
-                clearance.remarks = remarks
-            clearance.save()
-            return clearance
-
-        if clearance.status != ClearanceStatus.PENDING:
-            raise ValidationError("Only PENDING clearances can be reviewed.")
-
-        if canonical_status == ClearanceStatus.REJECTED and not remarks:
-            raise ValidationError("Remarks are required when rejecting a clearance.")
-
-        previous_state = {
-            'status': clearance.status,
-            'remarks': clearance.remarks
-        }
-
-        clearance.status = canonical_status
-        clearance.remarks = remarks
-        clearance.reviewed_by = actor
-        clearance.reviewed_at = timezone.now()
-        clearance.save()
-
-        new_state = {
-            'status': clearance.status,
-            'remarks': clearance.remarks,
-            'reviewed_by': str(actor.id)
-        }
-
-        audit_action = (
-            'CLEARANCE_APPROVED' if canonical_status == ClearanceStatus.APPROVED
-            else 'CLEARANCE_REJECTED' if canonical_status == ClearanceStatus.REJECTED
-            else 'CLEARANCE_RESET'
-        )
-
-        AuditService.log_action(
-            actor=actor,
-            action=audit_action,
-            object_type='StudentClearance',
-            object_id=clearance.id,
-            previous_state=previous_state,
-            new_state=new_state
-        )
-
-        if canonical_status in [ClearanceStatus.APPROVED, ClearanceStatus.REJECTED]:
-            notification_event = (
-                NotificationEvent.CLEARANCE_APPROVED
-                if canonical_status == ClearanceStatus.APPROVED
-                else NotificationEvent.CLEARANCE_REJECTED
-            )
-            msg = f"Your student clearance has been {canonical_status.lower()}."
-
-            NotificationService.create_notification(
-                recipient=clearance.user,
-                event_type=notification_event,
-                message=msg,
-                related_object_type='StudentClearance',
-                related_object_id=str(clearance.id)
-            )
-
-        return clearance
-
-
-class PaymentService:
-    @staticmethod
-    @transaction.atomic
-    def submit_payment(
-        actor, request, amount, receipt_image, receipt_reference_number=""
-    ):
-        request = CredentialRequest.objects.select_for_update().get(pk=request.pk)
-
-        if request.status != RequestStatus.PAYMENT_PENDING:
-            raise ValidationError(
-                "You can only submit an OTC payment when the request is "
-                "awaiting payment."
-            )
-
-        if Payment.objects.filter(
-            request=request, status=PaymentStatus.PENDING
-        ).exists():
-            raise ValidationError(
-                "A payment submission is already pending review for this request."
-            )
-
-        if receipt_reference_number and str(receipt_reference_number).strip():
-            ref_clean = str(receipt_reference_number).strip()
-            if Payment.objects.filter(
-                receipt_reference_number__iexact=ref_clean
-            ).exclude(status=PaymentStatus.REJECTED).exists():
-                raise ValidationError(
-                    f"Receipt / O.R. reference number '{ref_clean}' has "
-                    "already been used."
-                )
-
-        payment = Payment.objects.create(
-            request=request,
-            amount=amount,
-            receipt_reference_number=receipt_reference_number,
-            receipt_image=receipt_image,
-            status=PaymentStatus.PENDING
-        )
-
-        AuditService.log_action(
-            actor=actor,
-            action='PAYMENT_SUBMITTED',
-            object_type='Payment',
-            object_id=payment.id,
-            previous_state=None,
-            new_state={
-                'request_id': str(request.id),
-                'amount': str(amount),
-                'status': payment.status
-            }
-        )
-
-        target_staff = request.assigned_staff
-        if target_staff and target_staff != actor:
-            NotificationService.create_notification(
-                recipient=target_staff,
-                event_type=NotificationEvent.PAYMENT_SUBMITTED,
-                message=(
-                    f"Payment receipt uploaded for request {request.tracking_number} "
-                    f"by {actor.username}."
-                ),
-                related_object_type='Payment',
-                related_object_id=str(payment.id)
-            )
-        else:
-            registrars = User.objects.filter(
-                role=Role.REGISTRAR, is_active=True
-            )
-            for reg_user in registrars:
-                if reg_user != actor:
-                    NotificationService.create_notification(
-                        recipient=reg_user,
-                        event_type=NotificationEvent.PAYMENT_SUBMITTED,
-                        message=(
-                            f"Payment receipt uploaded for request "
-                            f"{request.tracking_number} by {actor.username}."
-                        ),
-                        related_object_type='Payment',
-                        related_object_id=str(payment.id)
-                    )
-
-        return payment
-
-    @staticmethod
-    @transaction.atomic
-    def verify_payment(actor, payment, action, remarks=""):
-        if action not in ['VERIFY', 'REJECT']:
-            raise ValidationError("Action must be VERIFY or REJECT.")
-
-        if action == 'REJECT' and not remarks:
-            raise ValidationError("Remarks are required when rejecting an OTC payment.")
-
-        previous_state = {
-            'status': payment.status,
-            'remarks': payment.remarks,
-            'verified_by': payment.verified_by.id if payment.verified_by else None
-        }
-
-        payment.status = (
-            PaymentStatus.VERIFIED if action == 'VERIFY' else PaymentStatus.REJECTED
-        )
-        if remarks:
-            payment.remarks = remarks
-        payment.verified_by = actor
-        payment.verified_at = timezone.now()
-        payment.save()
-
-        AuditService.log_action(
-            actor=actor,
-            action=f'PAYMENT_VERIFICATION_{action}',
-            object_type='Payment',
-            object_id=payment.id,
-            previous_state=previous_state,
-            new_state={
-                'status': payment.status,
-                'remarks': payment.remarks,
-                'verified_by': str(actor.id)
-            }
-        )
-
-        if action == 'VERIFY':
-            # This call is nested within verify_payment's atomic block.
-            # Django creates a savepoint here; the select_for_update in
-            # transition_request operates within the same connection and lock scope.
-            CredentialRequestService.transition_request(
-                actor=actor,
-                credential_request=payment.request,
-                new_status=RequestStatus.PAYMENT_VERIFIED,
-                remarks="Automated transition from verified OTC payment."
-            )
-            NotificationService.create_notification(
-                recipient=payment.request.user,
-                event_type=NotificationEvent.PAYMENT_VERIFIED,
-                message=(
-                    f"Your OTC payment for request "
-                    f"{payment.request.tracking_number} was verified."
-                ),
-                related_object_type='Payment',
-                related_object_id=str(payment.id)
-            )
-        else:
-            NotificationService.create_notification(
-                recipient=payment.request.user,
-                event_type=NotificationEvent.PAYMENT_REJECTED,
-                message=(
-                    f"Your OTC payment for request "
-                    f"{payment.request.tracking_number} was rejected. "
-                    "Please resubmit."
-                ),
-                related_object_type='Payment',
-                related_object_id=str(payment.id)
-            )
-
-        return payment

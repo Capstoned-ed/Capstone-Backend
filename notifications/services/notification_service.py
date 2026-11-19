@@ -1,5 +1,6 @@
 from django.db import transaction
-from .models import Notification
+
+from ..models import Notification
 
 
 class NotificationService:
@@ -48,3 +49,4 @@ class NotificationService:
             user=user, is_read=False
         )
         return unread_notifications.update(is_read=True)
+

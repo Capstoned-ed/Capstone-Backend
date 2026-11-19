@@ -1,4 +1,4 @@
-from .models import AuditLog
+from ..models import AuditLog
 
 
 class AuditService:
@@ -25,3 +25,4 @@ class AuditService:
             new_state=new_state,
             metadata=metadata
         )
+
