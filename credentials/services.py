@@ -126,11 +126,25 @@ class CredentialRequestService:
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.PAYMENT_PENDING: [
+            {'status': RequestStatus.FOR_VERIFICATION,
+                'roles': [Role.STUDENT, Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_VERIFIED,
                 'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
             {'status': RequestStatus.REJECTED,
                 'roles': [Role.STAFF, Role.REGISTRAR]}
+        ],
+        RequestStatus.FOR_VERIFICATION: [
+            {'status': RequestStatus.PAYMENT_VERIFIED,
+                'roles': [Role.STAFF, Role.REGISTRAR]},
+            {'status': RequestStatus.PROCESSING,
+                'roles': [Role.STAFF, Role.REGISTRAR]},
+            {'status': RequestStatus.PAYMENT_PENDING,
+                'roles': [Role.STAFF, Role.REGISTRAR]},
+            {'status': RequestStatus.REJECTED,
+                'roles': [Role.STAFF, Role.REGISTRAR]},
+            {'status': RequestStatus.CANCELLED,
+                'roles': [Role.STUDENT]}
         ],
         RequestStatus.PAYMENT_VERIFIED: [
             {'status': RequestStatus.PROCESSING, 'roles': [
@@ -298,6 +312,9 @@ class CredentialRequestService:
             'REQUIREMENTS_VERIFICATION': RequestStatus.REQUIREMENTS_VERIFICATION,
             'REQUIREMENTS_REJECTED': RequestStatus.REQUIREMENTS_REJECTED,
             'PAYMENT_PENDING': RequestStatus.PAYMENT_PENDING,
+            'FOR_VERIFICATION': RequestStatus.FOR_VERIFICATION,
+            'FOR VERIFICATION': RequestStatus.FOR_VERIFICATION,
+            'FOR_VERIFY': RequestStatus.FOR_VERIFICATION,
             'PAYMENT_VERIFIED': RequestStatus.PAYMENT_VERIFIED,
             'PROCESSING': RequestStatus.PROCESSING,
             'READY_FOR_RELEASE': RequestStatus.READY_FOR_RELEASE,
@@ -365,6 +382,13 @@ class CredentialRequestService:
                     new_assigned_user = s_user
 
             if new_assigned_user:
+                if (
+                    new_assigned_user.role != Role.STAFF or
+                    not new_assigned_user.is_active
+                ):
+                    raise ValidationError(
+                        "Only active staff members can be assigned to requests."
+                    )
                 prev_staff = credential_request.assigned_staff
                 credential_request.assigned_staff = new_assigned_user
                 credential_request.in_process_queue = True
@@ -379,6 +403,15 @@ class CredentialRequestService:
                         related_object_type='CredentialRequest',
                         related_object_id=str(credential_request.id)
                     )
+            elif str(assigned_staff).strip().lower() in ['none', 'unassigned', '']:
+                credential_request.assigned_staff = None
+                credential_request.in_process_queue = False
+                import re
+                if credential_request.remarks:
+                    credential_request.remarks = re.sub(
+                        r'\[Assigned(?:\s+to)?:\s*[^\]]+\]', '',
+                        credential_request.remarks
+                    ).strip(' |')
 
         if in_process_queue is not None:
             credential_request.in_process_queue = bool(in_process_queue)
@@ -924,7 +957,10 @@ class PaymentService:
     ):
         request = CredentialRequest.objects.select_for_update().get(pk=request.pk)
 
-        if request.status != RequestStatus.PAYMENT_PENDING:
+        if request.status not in [
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION
+        ]:
             raise ValidationError(
                 "You can only submit an OTC payment when the request is "
                 "awaiting payment."
@@ -942,18 +978,37 @@ class PaymentService:
             if Payment.objects.filter(
                 receipt_reference_number__iexact=ref_clean
             ).exclude(status=PaymentStatus.REJECTED).exists():
-                raise ValidationError(
-                    f"Receipt / O.R. reference number '{ref_clean}' has "
-                    "already been used."
-                )
+                err_msg = "This Official Receipt (O.R.) number is already in use."
+                raise ValidationError({
+                    'or_number': [err_msg],
+                    'receipt_reference_number': [err_msg]
+                })
 
+        ref_str = (
+            str(receipt_reference_number).strip()
+            if receipt_reference_number
+            else ""
+        )
         payment = Payment.objects.create(
             request=request,
             amount=amount,
-            receipt_reference_number=receipt_reference_number,
+            receipt_reference_number=ref_str,
             receipt_image=receipt_image,
             status=PaymentStatus.PENDING
         )
+
+        # Transition request status from PAYMENT_PENDING to FOR_VERIFICATION
+        if request.status == RequestStatus.PAYMENT_PENDING:
+            request.status = RequestStatus.FOR_VERIFICATION
+            request.save(update_fields=['status', 'updated_at'])
+            AuditService.log_action(
+                actor=actor,
+                action='REQUEST_STATUS_CHANGED_FOR_VERIFICATION',
+                object_type='CredentialRequest',
+                object_id=request.id,
+                previous_state={'status': RequestStatus.PAYMENT_PENDING},
+                new_state={'status': RequestStatus.FOR_VERIFICATION}
+            )
 
         AuditService.log_action(
             actor=actor,
@@ -1057,6 +1112,13 @@ class PaymentService:
                 related_object_id=str(payment.id)
             )
         else:
+            if payment.request.status == RequestStatus.FOR_VERIFICATION:
+                CredentialRequestService.transition_request(
+                    actor=actor,
+                    credential_request=payment.request,
+                    new_status=RequestStatus.PAYMENT_PENDING,
+                    remarks=f"Payment rejected: {remarks}"
+                )
             NotificationService.create_notification(
                 recipient=payment.request.user,
                 event_type=NotificationEvent.PAYMENT_REJECTED,
