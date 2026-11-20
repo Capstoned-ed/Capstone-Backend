@@ -59,10 +59,17 @@ class StaffDirectoryView(APIView):
 
     @extend_schema(responses={200: UserSerializer(many=True)})
     def get(self, request, *args, **kwargs):
-        qs = User.objects.filter(
-            is_active=True,
-            role__in=[Role.STAFF, Role.REGISTRAR, Role.ADMIN]
-        ).order_by('role', 'last_name', 'first_name')
+        role_param = request.query_params.get('role')
+        if role_param:
+            qs = User.objects.filter(
+                is_active=True,
+                role__iexact=role_param
+            ).order_by('last_name', 'first_name')
+        else:
+            qs = User.objects.filter(
+                is_active=True,
+                role__in=[Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+            ).order_by('role', 'last_name', 'first_name')
         serializer = UserSerializer(qs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -83,10 +90,27 @@ class UserViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [IsAuthenticated, IsAdminRole]
 
+    def get_permissions(self):
+        # Allow Staff, Registrar, and Admin to list users (e.g. role=STAFF)
+        if self.action == 'list':
+            return [IsAuthenticated(), IsStaffOrAdmin()]
+        return [IsAuthenticated(), IsAdminRole()]
+
     def get_queryset(self):
         qs = User.objects.all().order_by('-date_joined')
-        if self.request.user.is_authenticated and not self.request.user.is_superuser:
+        if (self.request.user.is_authenticated and
+                not self.request.user.is_superuser):
             qs = qs.filter(is_superuser=False)
+        role = self.request.query_params.get('role')
+        if role:
+            qs = qs.filter(role__iexact=role)
+        # Non-admin users can only see active staff/registrar/admin users
+        if (self.request.user.is_authenticated and
+                self.request.user.role not in [Role.ADMIN]):
+            qs = qs.filter(
+                role__in=[Role.STAFF, Role.REGISTRAR, Role.ADMIN],
+                is_active=True
+            )
         return qs
 
     def get_serializer_class(self):

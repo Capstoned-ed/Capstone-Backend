@@ -183,6 +183,27 @@ class TestStaffDirectoryView:
         res = api_client.get(url)
         assert res.status_code == status.HTTP_200_OK
 
+        # Staff users shortcut endpoint
+        staff_shortcut_url = reverse('staff-users-list')
+        api_client.force_authenticate(user=registrar)
+        res_shortcut = api_client.get(staff_shortcut_url)
+        assert res_shortcut.status_code == status.HTTP_200_OK
+
+        # Registrar listing users filtered by role=STAFF
+        user_list_url = reverse('user-list')
+        res_role_staff = api_client.get(f"{user_list_url}?role=STAFF")
+        assert res_role_staff.status_code == status.HTTP_200_OK
+        staff_usernames = [u['username'] for u in res_role_staff.data]
+        assert 'staff_dir1' in staff_usernames
+        assert 'stud_dir1' not in staff_usernames
+
+        # Registrar cannot create or modify users via UserViewSet (Admin only)
+        res_create = api_client.post(
+            user_list_url,
+            {'username': 'unauthorized', 'role': Role.STAFF}
+        )
+        assert res_create.status_code == status.HTTP_403_FORBIDDEN
+
         # Student forbidden
         api_client.force_authenticate(user=student)
         assert api_client.get(url).status_code == status.HTTP_403_FORBIDDEN
