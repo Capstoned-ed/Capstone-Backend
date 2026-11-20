@@ -24,22 +24,51 @@ def _format_audit_log(log, user):
         log.previous_state if isinstance(log.previous_state, dict) else {}
     )
     meta = log.metadata if isinstance(log.metadata, dict) else {}
+    details = (
+        meta.get('details') if isinstance(meta.get('details'), dict) else {}
+    )
 
-    target_name = (
-        new_state.get('full_name')
-        or new_state.get('username')
-        or prev_state.get('username')
-        or new_state.get('name')
+    student_name = (
+        new_state.get('student_name')
+        or prev_state.get('student_name')
         or meta.get('student_name')
-        or f"{log.object_type} #{log.object_id}"
+        or details.get('student_name')
+        or new_state.get('full_name')
+        or prev_state.get('full_name')
+        or meta.get('targetName')
     )
-    target_id = (
-        new_state.get('username')
-        or prev_state.get('username')
-        or new_state.get('tracking_number')
-        or new_state.get('code')
-        or str(log.object_id)
+
+    tracking_number = (
+        new_state.get('tracking_number')
+        or prev_state.get('tracking_number')
+        or meta.get('tracking_number')
+        or details.get('tracking_number')
+        or meta.get('trackingNumber')
+        or meta.get('tracking_code')
     )
+
+    if log.object_type == 'CredentialRequest':
+        target_name = student_name or 'Archived / Deleted Request'
+        target_id = tracking_number or (
+            '—' if target_name == 'Archived / Deleted Request'
+            else str(log.object_id)
+        )
+    else:
+        target_name = (
+            new_state.get('full_name')
+            or new_state.get('username')
+            or prev_state.get('username')
+            or new_state.get('name')
+            or student_name
+            or f"{log.object_type} #{log.object_id}"
+        )
+        target_id = (
+            new_state.get('username')
+            or prev_state.get('username')
+            or tracking_number
+            or new_state.get('code')
+            or str(log.object_id)
+        )
     role_or_doc = (
         new_state.get('role')
         or prev_state.get('role')
@@ -80,7 +109,7 @@ def _format_audit_log(log, user):
         'actorId': actor_id,
         'targetName': target_name,
         'targetId': target_id,
-        'trackingNumber': target_id,
+        'trackingNumber': tracking_number or target_id,
         'role': new_state.get('role') or prev_state.get('role'),
         'documentType': role_or_doc,
         'action': action_label,
