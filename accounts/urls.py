@@ -19,6 +19,11 @@ urlpatterns = [
         name='staff-directory'
     ),
     path(
+        'users/staff/',
+        StaffDirectoryView.as_view(),
+        name='staff-users-list'
+    ),
+    path(
         'auth/change-password/',
         ChangePasswordView.as_view(),
         name='change-password'
