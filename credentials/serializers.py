@@ -964,6 +964,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             existing_payment = Payment.objects.filter(
                 receipt_reference_number__iexact=ref_clean
             ).exclude(status=PaymentStatus.REJECTED)
+            if req:
+                existing_payment = existing_payment.exclude(
+                    request=req, status=PaymentStatus.PENDING
+                )
             if self.instance:
                 existing_payment = existing_payment.exclude(pk=self.instance.pk)
             if existing_payment.exists():

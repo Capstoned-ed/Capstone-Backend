@@ -981,18 +981,18 @@ class PaymentService:
                 "awaiting payment."
             )
 
-        if Payment.objects.filter(
+        pending_payment = Payment.objects.filter(
             request=request, status=PaymentStatus.PENDING
-        ).exists():
-            raise ValidationError(
-                "A payment submission is already pending review for this request."
-            )
+        ).order_by('-uploaded_at').first()
 
         if receipt_reference_number and str(receipt_reference_number).strip():
             ref_clean = str(receipt_reference_number).strip()
-            if Payment.objects.filter(
+            dup_qs = Payment.objects.filter(
                 receipt_reference_number__iexact=ref_clean
-            ).exclude(status=PaymentStatus.REJECTED).exists():
+            ).exclude(status=PaymentStatus.REJECTED)
+            if pending_payment:
+                dup_qs = dup_qs.exclude(pk=pending_payment.pk)
+            if dup_qs.exists():
                 err_msg = "This Official Receipt (O.R.) number is already in use."
                 raise ValidationError({
                     'or_number': [err_msg],
@@ -1004,13 +1004,23 @@ class PaymentService:
             if receipt_reference_number
             else ""
         )
-        payment = Payment.objects.create(
-            request=request,
-            amount=amount,
-            receipt_reference_number=ref_str,
-            receipt_image=receipt_image,
-            status=PaymentStatus.PENDING
-        )
+
+        if pending_payment:
+            pending_payment.amount = amount
+            pending_payment.receipt_reference_number = ref_str
+            if receipt_image:
+                pending_payment.receipt_image = receipt_image
+            pending_payment.uploaded_at = timezone.now()
+            pending_payment.save()
+            payment = pending_payment
+        else:
+            payment = Payment.objects.create(
+                request=request,
+                amount=amount,
+                receipt_reference_number=ref_str,
+                receipt_image=receipt_image,
+                status=PaymentStatus.PENDING
+            )
 
         # Transition request status from PAYMENT_PENDING to FOR_VERIFICATION
         if request.status == RequestStatus.PAYMENT_PENDING:
