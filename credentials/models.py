@@ -278,7 +278,21 @@ class CredentialRequest(models.Model):
             self.course = getattr(self.user, 'course_code', None) or 'IT'
 
         proc_days = getattr(self.credential_type, 'processing_days', None)
-        if not self.release_date and self.credential_type and proc_days:
+        pre_payment_statuses = [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.REQUIREMENTS_REJECTED,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+            RequestStatus.REJECTED,
+            RequestStatus.CANCELLED,
+        ]
+        if (
+            not self.release_date
+            and self.credential_type
+            and proc_days
+            and self.status not in pre_payment_statuses
+        ):
             self.release_date = (
                 timezone.now().date() + timezone.timedelta(days=int(proc_days))
             )
