@@ -74,6 +74,18 @@ class User(AbstractUser):
         default='1st year',
         help_text=_('Academic year level (e.g., 1st year, Alumnus).'),
     )
+    middle_name = models.CharField(
+        max_length=150,
+        blank=True,
+        default='',
+        help_text=_('Middle name or initial.'),
+    )
+    name_extension = models.CharField(
+        max_length=30,
+        blank=True,
+        default='',
+        help_text=_('Name extension or suffix (e.g., Jr., Sr., III).'),
+    )
 
     @property
     def clearance(self):

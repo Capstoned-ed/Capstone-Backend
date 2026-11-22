@@ -341,6 +341,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     approved_at = serializers.DateTimeField(read_only=True)
     is_approved = serializers.BooleanField(read_only=True)
     is_auto_approved = serializers.BooleanField(read_only=True)
+    release_date = serializers.DateField(required=False, allow_null=True)
     or_number = serializers.SerializerMethodField()
     receipt_reference_number = serializers.SerializerMethodField()
     receipt_image = serializers.SerializerMethodField()
@@ -360,6 +361,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'clearance_file_name', 'clearance_is_pdf',
             'approved_by', 'approved_by_name', 'approved_at',
             'is_approved', 'is_auto_approved',
+            'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
             'payment_status'
         ]
@@ -372,6 +374,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'clearance_file_name', 'clearance_is_pdf',
             'approved_by', 'approved_by_name', 'approved_at',
             'is_approved', 'is_auto_approved',
+            'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
             'payment_status'
         ]

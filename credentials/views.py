@@ -394,6 +394,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         remarks = request.data.get('remarks', '')
         assigned_staff = request.data.get('assigned_staff')
         in_process_queue = request.data.get('in_process_queue')
+        release_date = request.data.get('release_date') or request.data.get('date_of_release')
 
         if not new_status:
             return Response(
@@ -407,7 +408,8 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             new_status=new_status,
             remarks=remarks,
             assigned_staff=assigned_staff,
-            in_process_queue=in_process_queue
+            in_process_queue=in_process_queue,
+            release_date=release_date
         )
 
         return Response(

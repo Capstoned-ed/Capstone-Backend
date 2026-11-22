@@ -256,6 +256,11 @@ class CredentialRequest(models.Model):
         default=False,
         help_text="Flag indicating whether approval was granted automatically."
     )
+    release_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Frozen expected/actual date of document release."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -271,6 +276,9 @@ class CredentialRequest(models.Model):
     def save(self, *args, **kwargs):
         if not self.course:
             self.course = getattr(self.user, 'course_code', None) or 'IT'
+
+        if not self.release_date and self.credential_type and getattr(self.credential_type, 'processing_days', None):
+            self.release_date = timezone.now().date() + timezone.timedelta(days=int(self.credential_type.processing_days))
 
         if not self.tracking_number:
             date_str = timezone.now().strftime('%y-%m-%d')
