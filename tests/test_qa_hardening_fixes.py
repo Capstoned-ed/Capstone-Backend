@@ -489,3 +489,52 @@ class QAHardeningFixesTests(APITestCase):
         self.assertEqual(item_no_meta['actor'], 'Deleted User')
         self.assertNotEqual(item_no_meta['actor'], self.admin.username)
         self.assertEqual(item_no_meta['actorId'], 'deleted')
+
+    def test_enrolled_student_cannot_submit_graduate_only_purposes(self):
+        """Enrolled student cannot request graduate-only purposes (e.g. Board Exam)."""
+        student = User.objects.create_user(
+            username='stud_enrolled',
+            password='password123',
+            email='stud_enrolled@test.com',
+            role=Role.STUDENT,
+            year_level='2nd year'
+        )
+        StudentClearance.objects.create(
+            user=student,
+            status=ClearanceStatus.APPROVED,
+            file=SimpleUploadedFile("clr.pdf", b"pdf", content_type="application/pdf")
+        )
+        self.client.force_authenticate(user=student)
+        url = reverse('credentialrequest-list')
+        payload = {
+            'credential_type': self.cred_type.id,
+            'remarks': 'For Board Exam [Copies: 1]',
+            'date_of_graduation': 'May 2026'
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('remarks', str(res.data).lower())
+
+    def test_alumnus_can_submit_graduate_only_purposes(self):
+        """Alumnus user can submit graduate-only purposes."""
+        alumnus = User.objects.create_user(
+            username='stud_alumnus',
+            password='password123',
+            email='stud_alumnus@test.com',
+            role=Role.STUDENT,
+            year_level='Alumnus'
+        )
+        StudentClearance.objects.create(
+            user=alumnus,
+            status=ClearanceStatus.APPROVED,
+            file=SimpleUploadedFile("clr.pdf", b"pdf", content_type="application/pdf")
+        )
+        self.client.force_authenticate(user=alumnus)
+        url = reverse('credentialrequest-list')
+        payload = {
+            'credential_type': self.cred_type.id,
+            'remarks': 'For Board Exam [Copies: 1]',
+            'date_of_graduation': 'June 2024'
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)

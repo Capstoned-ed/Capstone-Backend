@@ -314,6 +314,9 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     custom_doc_code = serializers.CharField(
         max_length=20, required=False, write_only=True
     )
+    date_of_graduation = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, write_only=True
+    )
     copies = serializers.IntegerField(
         required=False, min_value=1, max_value=100, write_only=True
     )
@@ -352,7 +355,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'course', 'credential_type', 'status',
             'tracking_number', 'remarks', 'created_at', 'updated_at',
-            'documents', 'payments', 'custom_doc_code', 'copies',
+            'documents', 'payments', 'custom_doc_code', 'date_of_graduation', 'copies',
             'document_items', 'total_amount',
             'student_name', 'student_id', 'student_email',
             'credential_name', 'credential_code', 'assigned_staff',
@@ -636,6 +639,33 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         return self.validate_assigned_staff(value)
 
     def validate(self, attrs):
+        request_obj = self.context.get('request')
+        actor = getattr(request_obj, 'user', None)
+        if actor and getattr(actor, 'role', None) == Role.STUDENT:
+            year_str = str(
+                getattr(actor, 'year_level', '') or ''
+            ).strip().lower()
+            is_alumnus = 'alumn' in year_str or 'grad' in year_str
+            if not is_alumnus:
+                attrs.pop('date_of_graduation', None)
+                raw_remarks = str(attrs.get('remarks') or '').lower()
+                grad_patterns = [
+                    r'\bfor board exam\b',
+                    r'\bboard exam\b',
+                    r'\bfor advanced studies\b',
+                    r'\badvanced studies\b',
+                    r'\bfor ranking\b',
+                    r'\branking\b',
+                ]
+                if any(re.search(pat, raw_remarks) for pat in grad_patterns):
+                    raise serializers.ValidationError({
+                        'remarks': (
+                            "Purposes 'For Board Exam', 'For Advanced Studies', "
+                            "and 'For Ranking' are reserved for alumni and graduates "
+                            "only."
+                        )
+                    })
+
         copies_val = attrs.pop('copies', None)
         raw_items = attrs.pop('document_items', None)
         attrs.pop('total_amount', None)
