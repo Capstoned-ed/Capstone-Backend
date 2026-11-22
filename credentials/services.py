@@ -455,11 +455,16 @@ class CredentialRequestService:
         if release_date:
             from datetime import datetime, date
             if isinstance(release_date, (datetime, date)):
-                credential_request.release_date = release_date if isinstance(release_date, date) else release_date.date()
+                credential_request.release_date = (
+                    release_date if isinstance(release_date, date)
+                    else release_date.date()
+                )
             elif isinstance(release_date, str) and release_date.strip():
                 clean_str = release_date.strip().split('T')[0]
                 try:
-                    credential_request.release_date = datetime.strptime(clean_str, '%Y-%m-%d').date()
+                    credential_request.release_date = datetime.strptime(
+                        clean_str, '%Y-%m-%d'
+                    ).date()
                 except ValueError:
                     pass
 

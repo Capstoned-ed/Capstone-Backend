@@ -64,7 +64,11 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_full_name(self, obj):
-        parts = [getattr(obj, 'first_name', ''), getattr(obj, 'middle_name', ''), getattr(obj, 'last_name', '')]
+        parts = [
+            getattr(obj, 'first_name', ''),
+            getattr(obj, 'middle_name', ''),
+            getattr(obj, 'last_name', ''),
+        ]
         name = " ".join(p for p in parts if p).strip()
         ext = getattr(obj, 'name_extension', '')
         if ext:
@@ -171,7 +175,10 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['email', 'birth_date', 'contact_number', 'year_level', 'middle_name', 'name_extension']
+        fields = [
+            'email', 'birth_date', 'contact_number',
+            'year_level', 'middle_name', 'name_extension',
+        ]
         extra_kwargs = {
             'email': {'required': False},
             'birth_date': {'required': False, 'allow_null': True},
