@@ -28,8 +28,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['username'] = user.username
         token['role'] = user.role
         token['first_name'] = user.first_name
+        token['middle_name'] = getattr(user, 'middle_name', '')
         token['last_name'] = user.last_name
-        full_name = f"{user.first_name} {user.last_name}".strip()
+        token['name_extension'] = getattr(user, 'name_extension', '')
+        name_parts = [user.first_name, getattr(user, 'middle_name', ''), user.last_name]
+        full_name = " ".join(p for p in name_parts if p).strip()
+        if getattr(user, 'name_extension', ''):
+            full_name = f"{full_name} {user.name_extension}".strip()
         token['full_name'] = full_name or user.username
         token['force_password_change'] = user.force_password_change
 
@@ -50,7 +55,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'role',
-            'first_name', 'last_name', 'full_name',
+            'first_name', 'middle_name', 'last_name', 'name_extension', 'full_name',
             'course_name', 'course_code',
             'birth_date', 'contact_number', 'year_level',
             'is_active', 'force_password_change',
@@ -59,8 +64,16 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_full_name(self, obj):
-        name = f"{obj.first_name} {obj.last_name}".strip()
-        return name or obj.username
+        parts = [
+            getattr(obj, 'first_name', ''),
+            getattr(obj, 'middle_name', ''),
+            getattr(obj, 'last_name', ''),
+        ]
+        name = " ".join(p for p in parts if p).strip()
+        ext = getattr(obj, 'name_extension', '')
+        if ext:
+            name = f"{name} {ext}".strip()
+        return name or getattr(obj, 'username', '')
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -72,22 +85,30 @@ class UserCreateSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(
         max_length=150, required=False, allow_blank=True, default=''
     )
+    middle_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
     last_name = serializers.CharField(
         max_length=150, required=False, allow_blank=True, default=''
+    )
+    name_extension = serializers.CharField(
+        max_length=30, required=False, allow_blank=True, default=''
     )
 
     class Meta:
         model = User
         fields = [
             'username', 'email', 'password', 'role',
-            'first_name', 'last_name',
+            'first_name', 'middle_name', 'last_name', 'name_extension',
             'course_name', 'course_code',
             'birth_date', 'contact_number', 'year_level',
         ]
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
             'first_name': {'required': False},
+            'middle_name': {'required': False},
             'last_name': {'required': False},
+            'name_extension': {'required': False},
             'course_name': {'required': False},
             'course_code': {'required': False},
             'birth_date': {'required': False, 'allow_null': True},
@@ -114,15 +135,32 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     """
     Validation layer for updating an existing user.
     """
+    first_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    middle_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    last_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    name_extension = serializers.CharField(
+        max_length=30, required=False, allow_blank=True, default=''
+    )
+
     class Meta:
         model = User
         fields = [
-            'email', 'role', 'first_name', 'last_name',
+            'email', 'role', 'first_name', 'middle_name', 'last_name', 'name_extension',
             'course_name', 'course_code',
             'birth_date', 'contact_number', 'year_level',
             'is_active',
         ]
         extra_kwargs = {
+            'first_name': {'required': False},
+            'middle_name': {'required': False},
+            'last_name': {'required': False},
+            'name_extension': {'required': False},
             'course_name': {'required': False},
             'course_code': {'required': False},
             'birth_date': {'required': False, 'allow_null': True},
@@ -137,12 +175,17 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = User
-        fields = ['email', 'birth_date', 'contact_number', 'year_level']
+        fields = [
+            'email', 'birth_date', 'contact_number',
+            'year_level', 'middle_name', 'name_extension',
+        ]
         extra_kwargs = {
             'email': {'required': False},
             'birth_date': {'required': False, 'allow_null': True},
             'contact_number': {'required': False},
             'year_level': {'required': False},
+            'middle_name': {'required': False},
+            'name_extension': {'required': False},
         }
 
 
