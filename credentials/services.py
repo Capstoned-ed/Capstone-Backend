@@ -210,14 +210,14 @@ class CredentialRequestService:
                 "a valid clearance before requesting a document."
             )
 
-        validated_data.pop('date_of_graduation', None)
+        date_grad = str(validated_data.pop('date_of_graduation', None) or '').strip()
         if actor and getattr(actor, 'role', None) == Role.STUDENT:
+            import re
             year_str = str(
                 getattr(actor, 'year_level', '') or ''
             ).strip().lower()
             is_alumnus = 'alumn' in year_str or 'grad' in year_str
             if not is_alumnus:
-                import re
                 raw_remarks = str(validated_data.get('remarks') or '').lower()
                 grad_patterns = [
                     r'\bfor board exam\b',
@@ -232,6 +232,16 @@ class CredentialRequestService:
                         "Purposes 'For Board Exam', 'For Advanced Studies', "
                         "and 'For Ranking' are reserved for alumni and graduates "
                         "only."
+                    )
+            elif date_grad:
+                cur_remarks = str(validated_data.get('remarks') or '').strip()
+                if not re.search(
+                    r'\[(?:Date of Graduation|Graduation Date|Graduation):',
+                    cur_remarks,
+                    re.IGNORECASE,
+                ):
+                    validated_data['remarks'] = (
+                        f"{cur_remarks} [Graduation: {date_grad}]".strip()
                     )
 
         copies = validated_data.pop('copies', None)

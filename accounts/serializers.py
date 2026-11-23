@@ -135,6 +135,15 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     """
     Validation layer for updating an existing user.
     """
+    username = serializers.CharField(
+        max_length=150, required=False
+    )
+    student_id = serializers.CharField(
+        max_length=150, required=False, write_only=True
+    )
+    employee_id = serializers.CharField(
+        max_length=150, required=False, write_only=True
+    )
     first_name = serializers.CharField(
         max_length=150, required=False, allow_blank=True, default=''
     )
@@ -151,12 +160,15 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'email', 'role', 'first_name', 'middle_name', 'last_name', 'name_extension',
+            'username', 'student_id', 'employee_id',
+            'email', 'role', 'first_name', 'middle_name', 'last_name',
+            'name_extension',
             'course_name', 'course_code',
             'birth_date', 'contact_number', 'year_level',
             'is_active',
         ]
         extra_kwargs = {
+            'username': {'required': False},
             'first_name': {'required': False},
             'middle_name': {'required': False},
             'last_name': {'required': False},
@@ -167,6 +179,34 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             'contact_number': {'required': False},
             'year_level': {'required': False},
         }
+
+    def validate(self, attrs):
+        student_id_val = attrs.pop('student_id', None)
+        employee_id_val = attrs.pop('employee_id', None)
+        raw_uid = student_id_val or employee_id_val or attrs.get('username')
+
+        if raw_uid is not None:
+            clean_uid = str(raw_uid).strip()
+            if not clean_uid:
+                raise serializers.ValidationError({
+                    'username': "User ID cannot be blank.",
+                    'student_id': "Student ID cannot be blank.",
+                })
+            qs = User.objects.filter(username__iexact=clean_uid)
+            if self.instance and self.instance.pk:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({
+                    'username': (
+                        "This User ID is already registered to another user."
+                    ),
+                    'student_id': (
+                        "This User ID is already registered to another user."
+                    ),
+                })
+            attrs['username'] = clean_uid
+
+        return super().validate(attrs)
 
 
 class SelfProfileUpdateSerializer(serializers.ModelSerializer):
