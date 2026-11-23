@@ -398,6 +398,8 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             request.data.get('release_date')
             or request.data.get('date_of_release')
         )
+        approved_by_name = request.data.get('approved_by_name')
+        verified_by_name = request.data.get('verified_by_name')
 
         if not new_status:
             return Response(
@@ -412,7 +414,9 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             remarks=remarks,
             assigned_staff=assigned_staff,
             in_process_queue=in_process_queue,
-            release_date=release_date
+            release_date=release_date,
+            approved_by_name=approved_by_name,
+            verified_by_name=verified_by_name
         )
 
         return Response(

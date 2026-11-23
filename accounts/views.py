@@ -41,12 +41,16 @@ class CurrentUserView(APIView):
 
     @extend_schema(responses={200: UserSerializer})
     def patch(self, request, *args, **kwargs):
-        user = request.user
-        for field in ['first_name', 'last_name', 'email']:
-            if field in request.data:
-                setattr(user, field, request.data[field])
-        user.save()
-        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+        serializer = SelfProfileUpdateSerializer(
+            request.user, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = AccountService.update_user(
+            actor=request.user,
+            user=request.user,
+            validated_data=serializer.validated_data,
+        )
+        return Response(UserSerializer(updated).data, status=status.HTTP_200_OK)
 
 
 class StaffDirectoryView(APIView):

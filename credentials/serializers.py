@@ -340,6 +340,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     clearance_file_name = serializers.SerializerMethodField()
     clearance_is_pdf = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
     approved_by = serializers.PrimaryKeyRelatedField(read_only=True)
     approved_at = serializers.DateTimeField(read_only=True)
     is_approved = serializers.BooleanField(read_only=True)
@@ -362,7 +363,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'assigned_to', 'in_process_queue',
             'clearance_id', 'clearance_status', 'clearance_preview',
             'clearance_file_name', 'clearance_is_pdf',
-            'approved_by', 'approved_by_name', 'approved_at',
+            'approved_by', 'approved_by_name', 'approved_at', 'verified_by_name',
             'is_approved', 'is_auto_approved',
             'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
@@ -375,7 +376,7 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'assigned_staff', 'assigned_to', 'in_process_queue',
             'clearance_id', 'clearance_status', 'clearance_preview',
             'clearance_file_name', 'clearance_is_pdf',
-            'approved_by', 'approved_by_name', 'approved_at',
+            'approved_by', 'approved_by_name', 'approved_at', 'verified_by_name',
             'is_approved', 'is_auto_approved',
             'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
@@ -563,6 +564,29 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             last = getattr(appr_by, 'last_name', '')
             full = f"{first} {last}".strip()
             return full or getattr(appr_by, 'username', '')
+        return ''
+
+    def get_verified_by_name(self, obj):
+        import re
+        remarks = (
+            obj.get('remarks', '')
+            if isinstance(obj, dict)
+            else getattr(obj, 'remarks', '')
+        ) or ''
+        match = re.search(r'\[VerifiedBy:([^\]]+)\]', remarks)
+        if match:
+            return match.group(1).strip()
+        staff = (
+            obj.get('assigned_staff')
+            if isinstance(obj, dict)
+            else getattr(obj, 'assigned_staff', None)
+        )
+        if staff:
+            first = getattr(staff, 'first_name', '')
+            last = getattr(staff, 'last_name', '')
+            full = f"{first} {last}".strip()
+            return full or getattr(staff, 'username', '')
+        return ''
         is_appr = (
             obj.get('is_approved')
             if isinstance(obj, dict)

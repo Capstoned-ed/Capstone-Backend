@@ -106,20 +106,20 @@ class CredentialRequestService:
     TRANSITION_MATRIX = {
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
-                'roles': [Role.STAFF]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
                 'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
             {'status': RequestStatus.PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
-                'roles': [Role.STAFF]},
+                'roles': [Role.STAFF, Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
                 'roles': [Role.STAFF, Role.REGISTRAR]}
         ],
@@ -336,7 +336,8 @@ class CredentialRequestService:
     @transaction.atomic
     def transition_request(
         actor, credential_request, new_status, remarks="",
-        assigned_staff=None, in_process_queue=None, release_date=None
+        assigned_staff=None, in_process_queue=None, release_date=None,
+        approved_by_name=None, verified_by_name=None
     ):
         credential_request = (
             CredentialRequest.objects
@@ -464,6 +465,7 @@ class CredentialRequestService:
                 (r'\[Copies:[^\]]+\]', r'\[Copies:'),
                 (r'\[Total:[^\]]+\]', r'\[Total:'),
                 (r'\[Items:\[[\s\S]*?\]\]', r'\[Items:\['),
+                (r'\[VerifiedBy:[^\]]+\]', r'\[VerifiedBy:'),
             ]
             for full_pat, check_pat in patterns:
                 if not re.search(check_pat, updated, re.IGNORECASE):
@@ -491,6 +493,9 @@ class CredentialRequestService:
                     ).date()
                 except ValueError:
                     pass
+
+        if approved_by_name is not None and str(approved_by_name).strip():
+            credential_request.approved_by_name = str(approved_by_name).strip()
 
         # Allow Staff/Registrar/Admin to update remarks without changing status
         if canonical_status == current_status:
@@ -646,6 +651,17 @@ class CredentialRequestService:
                         "This request requires Registrar approval before it can "
                         "proceed to release."
                     )
+
+        if approved_by_name is not None and str(approved_by_name).strip():
+            credential_request.approved_by_name = str(approved_by_name).strip()
+
+        if verified_by_name is not None and str(verified_by_name).strip():
+            import re
+            clean_vname = str(verified_by_name).strip().replace(']', '')
+            base_rem = re.sub(
+                r'\[VerifiedBy:[^\]]*\]', '', credential_request.remarks or ''
+            ).strip()
+            credential_request.remarks = f"{base_rem} [VerifiedBy:{clean_vname}]".strip()
 
         credential_request.save()
 
