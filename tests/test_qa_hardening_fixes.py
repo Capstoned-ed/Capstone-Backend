@@ -1,8 +1,10 @@
 import shutil
 import tempfile
+import time
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
@@ -20,6 +22,8 @@ from credentials.models import (
 )
 from credentials.services import PaymentService
 from credentials.storage import private_storage
+from notifications.models import Notification, NotificationEvent
+from notifications.services import NotificationService
 
 User = get_user_model()
 
@@ -621,3 +625,117 @@ class QAHardeningFixesTests(APITestCase):
         self.assertEqual(res.data.get('user_category'), 'alumnus')
         self.assertEqual(res.data.get('year_level'), 'Alumnus')
         self.assertEqual(res.data.get('date_of_graduation'), 'March 2024')
+
+    def test_notification_deduplication_guard(self):
+        """NotificationService.create_notification deduplicates within 60 seconds."""
+        user = User.objects.create_user(
+            username='notif_dedup_user',
+            password='password123',
+            email='notif_dedup@test.com',
+            role=Role.STUDENT,
+        )
+        notif1 = NotificationService.create_notification(
+            recipient=user,
+            event_type=NotificationEvent.REQUEST_CREATED,
+            message="Test message",
+            related_object_type="CredentialRequest",
+            related_object_id="12345",
+        )
+        notif2 = NotificationService.create_notification(
+            recipient=user,
+            event_type=NotificationEvent.REQUEST_CREATED,
+            message="Test message duplicate",
+            related_object_type="CredentialRequest",
+            related_object_id="12345",
+        )
+        self.assertEqual(notif1.id, notif2.id)
+        self.assertEqual(
+            Notification.objects.filter(
+                user=user,
+                event_type=NotificationEvent.REQUEST_CREATED,
+                related_object_id="12345"
+            ).count(),
+            1
+        )
+
+    def test_send_request_notification_dispatches_email(self):
+        """send_request_notification creates notification and sends email."""
+        user = User.objects.create_user(
+            username='email_notif_user',
+            first_name='Daisy',
+            last_name='Traya',
+            password='password123',
+            email='daisy.traya@ustp.edu.ph',
+            role=Role.STUDENT,
+        )
+        notif = NotificationService.send_request_notification(
+            user=user,
+            title="Request Ready",
+            message="Your credential is ready.",
+            reference_id="REQ-99999",
+            send_email=True,
+        )
+        self.assertIsNotNone(notif)
+        time.sleep(0.1)  # wait for daemon thread
+        self.assertGreaterEqual(len(mail.outbox), 1)
+        sent_email = mail.outbox[-1]
+        self.assertIn("daisy.traya@ustp.edu.ph", sent_email.to)
+        self.assertIn("RegQuest - Request Ready", sent_email.subject)
+        self.assertIn("REQ-99999", sent_email.body)
+
+    def test_self_profile_update_persists_editable_fields(self):
+        """PATCH /api/users/me/ updates editable profile fields."""
+        student = User.objects.create_user(
+            username='self_profile_updater',
+            first_name='OldFirst',
+            last_name='OldLast',
+            password='password123',
+            email='old@test.com',
+            role=Role.STUDENT,
+        )
+        self.client.force_authenticate(user=student)
+        url = reverse('user-me')
+        payload = {
+            'first_name': 'NewFirst',
+            'last_name': 'NewLast',
+            'contact_number': '09123456789',
+            'birth_date': '2002-05-15',
+            'year_level': '3rd year',
+        }
+        res = self.client.patch(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        student.refresh_from_db()
+        self.assertEqual(student.first_name, 'NewFirst')
+        self.assertEqual(student.last_name, 'NewLast')
+        self.assertEqual(student.contact_number, '09123456789')
+        self.assertEqual(str(student.birth_date), '2002-05-15')
+        self.assertEqual(student.year_level, '3rd year')
+
+    def test_credential_request_creation_generates_single_student_notification(self):
+        """Submitting a request generates exactly one notification for student."""
+        student = User.objects.create_user(
+            username='single_notif_student',
+            password='password123',
+            email='single_notif@test.com',
+            role=Role.STUDENT,
+            year_level='2nd year',
+        )
+        StudentClearance.objects.create(
+            user=student,
+            status=ClearanceStatus.APPROVED,
+            file=SimpleUploadedFile("clr.pdf", b"pdf", content_type="application/pdf"),
+        )
+        self.client.force_authenticate(user=student)
+        url = reverse('credentialrequest-list')
+        payload = {
+            'credential_type': self.cred_type.id,
+            'remarks': 'Single notification test',
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        student_notifs = Notification.objects.filter(
+            user=student,
+            event_type=NotificationEvent.REQUEST_CREATED,
+        )
+        self.assertEqual(student_notifs.count(), 1)

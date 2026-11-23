@@ -292,16 +292,18 @@ class CredentialRequestService:
             }
         )
 
-        msg = (
-            f"Your credential request ({credential_request.tracking_number}) "
-            "has been created."
-        )
-        NotificationService.create_notification(
-            recipient=actor,
+        NotificationService.send_request_notification(
+            user=actor,
+            title=f"Request Submitted ({credential_request.tracking_number})",
+            message=(
+                f"Your credential request ({credential_request.tracking_number}) "
+                f"for {credential_request.credential_type.name} has been submitted "
+                "successfully. Status: Pending."
+            ),
+            reference_id=str(credential_request.id),
+            send_email=True,
             event_type=NotificationEvent.REQUEST_CREATED,
-            message=msg,
             related_object_type='CredentialRequest',
-            related_object_id=str(credential_request.id)
         )
 
         # Notify operational Registrar (Admin is not a request processor)
@@ -676,17 +678,67 @@ class CredentialRequestService:
         )
 
         if actor.role != Role.STUDENT:
-            msg = (
-                f"Your request ({credential_request.tracking_number}) "
-                f"status changed to {canonical_status}."
-            )
-            NotificationService.create_notification(
-                recipient=credential_request.user,
-                event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
-                message=msg,
-                related_object_type='CredentialRequest',
-                related_object_id=str(credential_request.id)
-            )
+            if canonical_status == RequestStatus.PROCESSING:
+                title = f"Request Processing ({credential_request.tracking_number})"
+                msg = (
+                    f"Your credential request ({credential_request.tracking_number}) "
+                    "is now being processed."
+                )
+                NotificationService.send_request_notification(
+                    user=credential_request.user,
+                    title=title,
+                    message=msg,
+                    reference_id=str(credential_request.id),
+                    send_email=True,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                )
+            elif canonical_status == RequestStatus.READY_FOR_RELEASE:
+                title = f"Ready for Release ({credential_request.tracking_number})"
+                msg = (
+                    f"Your requested credential ({credential_request.tracking_number}) "
+                    "is ready for release. Please visit the Registrar's Office to "
+                    "claim your document."
+                )
+                NotificationService.send_request_notification(
+                    user=credential_request.user,
+                    title=title,
+                    message=msg,
+                    reference_id=str(credential_request.id),
+                    send_email=True,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                )
+            elif canonical_status in [
+                RequestStatus.REJECTED,
+                RequestStatus.REQUIREMENTS_REJECTED
+            ]:
+                title = (
+                    f"Request Action Required ({credential_request.tracking_number})"
+                )
+                clean_rem = str(credential_request.remarks or '').strip()
+                msg = (
+                    f"Your request ({credential_request.tracking_number}) requires "
+                    f"action: {clean_rem or 'Please check your dashboard for details.'}"
+                )
+                NotificationService.send_request_notification(
+                    user=credential_request.user,
+                    title=title,
+                    message=msg,
+                    reference_id=str(credential_request.id),
+                    send_email=True,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                )
+            else:
+                msg = (
+                    f"Your request ({credential_request.tracking_number}) "
+                    f"status changed to {canonical_status}."
+                )
+                NotificationService.create_notification(
+                    recipient=credential_request.user,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                    message=msg,
+                    related_object_type='CredentialRequest',
+                    related_object_id=str(credential_request.id)
+                )
 
         return credential_request
 
@@ -1176,15 +1228,17 @@ class PaymentService:
                 new_status=RequestStatus.PAYMENT_VERIFIED,
                 remarks="Automated transition from verified OTC payment."
             )
-            NotificationService.create_notification(
-                recipient=payment.request.user,
-                event_type=NotificationEvent.PAYMENT_VERIFIED,
+            NotificationService.send_request_notification(
+                user=payment.request.user,
+                title=f"Payment Verified ({payment.request.tracking_number})",
                 message=(
-                    f"Your OTC payment for request "
-                    f"{payment.request.tracking_number} was verified."
+                    f"Your payment for request {payment.request.tracking_number} "
+                    "has been verified and is now processing."
                 ),
+                reference_id=str(payment.request.id),
+                send_email=True,
+                event_type=NotificationEvent.PAYMENT_VERIFIED,
                 related_object_type='Payment',
-                related_object_id=str(payment.id)
             )
         else:
             if payment.request.status == RequestStatus.FOR_VERIFICATION:
@@ -1194,16 +1248,18 @@ class PaymentService:
                     new_status=RequestStatus.PAYMENT_PENDING,
                     remarks=f"Payment rejected: {remarks}"
                 )
-            NotificationService.create_notification(
-                recipient=payment.request.user,
-                event_type=NotificationEvent.PAYMENT_REJECTED,
+            NotificationService.send_request_notification(
+                user=payment.request.user,
+                title=f"Payment Rejected ({payment.request.tracking_number})",
                 message=(
                     f"Your OTC payment for request "
-                    f"{payment.request.tracking_number} was rejected. "
-                    "Please resubmit."
+                    f"{payment.request.tracking_number} was rejected: "
+                    f"{remarks or 'Please re-upload a valid proof of payment.'}"
                 ),
+                reference_id=str(payment.request.id),
+                send_email=True,
+                event_type=NotificationEvent.PAYMENT_REJECTED,
                 related_object_type='Payment',
-                related_object_id=str(payment.id)
             )
 
         return payment
