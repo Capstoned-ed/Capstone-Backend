@@ -227,58 +227,66 @@ class QAHardeningFixesTests(APITestCase):
         """
         self.client.force_authenticate(user=self.registrar)
 
-        # 1. PENDING request
-        req_pending = CredentialRequest.objects.create(
-            user=self.student,
-            credential_type=self.cred_type,
-            status=RequestStatus.PENDING
-        )
-        assign_url_1 = reverse(
-            'credentialrequest-assign', kwargs={'pk': req_pending.id}
-        )
-        res1 = self.client.post(
-            assign_url_1,
-            {'assigned_staff': self.staff1.username},
-            format='json'
-        )
-        self.assertEqual(res1.status_code, status.HTTP_200_OK)
-        req_pending.refresh_from_db()
-        self.assertEqual(req_pending.status, RequestStatus.PENDING)
-        self.assertEqual(req_pending.assigned_staff, self.staff1)
+        # 1. Unverified requests return 400 when attempting staff assignment
+        for unverified_st in [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+        ]:
+            req_unverified = CredentialRequest.objects.create(
+                user=self.student,
+                credential_type=self.cred_type,
+                status=unverified_st,
+            )
+            assign_url = reverse(
+                'credentialrequest-assign', kwargs={'pk': req_unverified.id}
+            )
+            res = self.client.post(
+                assign_url,
+                {'assigned_staff': self.staff1.username},
+                format='json',
+            )
+            self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn('unverified', str(res.data).lower())
 
-        # 2. PAYMENT_PENDING request
-        req_pay = CredentialRequest.objects.create(
+        # 2. Verified request: PROCESSING preserves status on assignment
+        req_proc = CredentialRequest.objects.create(
             user=self.student,
             credential_type=self.cred_type,
-            status=RequestStatus.PAYMENT_PENDING
+            status=RequestStatus.PROCESSING,
         )
-        assign_url_2 = reverse('credentialrequest-assign', kwargs={'pk': req_pay.id})
-        res2 = self.client.post(
-            assign_url_2,
+        assign_url_proc = reverse(
+            'credentialrequest-assign', kwargs={'pk': req_proc.id}
+        )
+        res_proc = self.client.post(
+            assign_url_proc,
+            {'assigned_staff': self.staff1.username},
+            format='json',
+        )
+        self.assertEqual(res_proc.status_code, status.HTTP_200_OK)
+        req_proc.refresh_from_db()
+        self.assertEqual(req_proc.status, RequestStatus.PROCESSING)
+        self.assertEqual(req_proc.assigned_staff, self.staff1)
+
+        # 3. Verified request: READY_FOR_RELEASE preserves status on assignment
+        req_ready = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.READY_FOR_RELEASE,
+        )
+        assign_url_ready = reverse(
+            'credentialrequest-assign', kwargs={'pk': req_ready.id}
+        )
+        res_ready = self.client.post(
+            assign_url_ready,
             {'assigned_staff': self.staff2.username},
-            format='json'
+            format='json',
         )
-        self.assertEqual(res2.status_code, status.HTTP_200_OK)
-        req_pay.refresh_from_db()
-        self.assertEqual(req_pay.status, RequestStatus.PAYMENT_PENDING)
-        self.assertEqual(req_pay.assigned_staff, self.staff2)
-
-        # 3. FOR_VERIFICATION request
-        req_fv = CredentialRequest.objects.create(
-            user=self.student,
-            credential_type=self.cred_type,
-            status=RequestStatus.FOR_VERIFICATION
-        )
-        assign_url_3 = reverse('credentialrequest-assign', kwargs={'pk': req_fv.id})
-        res3 = self.client.post(
-            assign_url_3,
-            {'assigned_staff': self.staff1.username},
-            format='json'
-        )
-        self.assertEqual(res3.status_code, status.HTTP_200_OK)
-        req_fv.refresh_from_db()
-        self.assertEqual(req_fv.status, RequestStatus.FOR_VERIFICATION)
-        self.assertEqual(req_fv.assigned_staff, self.staff1)
+        self.assertEqual(res_ready.status_code, status.HTTP_200_OK)
+        req_ready.refresh_from_db()
+        self.assertEqual(req_ready.status, RequestStatus.READY_FOR_RELEASE)
+        self.assertEqual(req_ready.assigned_staff, self.staff2)
 
     def test_assign_only_active_staff_members(self):
         """
@@ -289,7 +297,7 @@ class QAHardeningFixesTests(APITestCase):
         req = CredentialRequest.objects.create(
             user=self.student,
             credential_type=self.cred_type,
-            status=RequestStatus.PENDING
+            status=RequestStatus.PROCESSING,
         )
         assign_url = reverse('credentialrequest-assign', kwargs={'pk': req.id})
 

@@ -221,11 +221,11 @@ class StudentClearanceAPITests(APITestCase):
         self.student = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
         )
-        self.registrar = User.objects.create_user(
-            username='reg_clear', email='rc@test.com', password='p', role=Role.REGISTRAR
-        )
         self.staff = User.objects.create_user(
             username='staff1', email='st@test.com', password='p', role=Role.STAFF
+        )
+        self.registrar = User.objects.create_user(
+            username='reg_clr', email='rc@test.com', password='p', role=Role.REGISTRAR
         )
         self.url_list = reverse('studentclearance-list')
 
@@ -238,20 +238,6 @@ class StudentClearanceAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['status'], ClearanceStatus.PENDING)
-
-    def test_staff_cannot_review_clearance(self):
-        file = SimpleUploadedFile(
-            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
-        )
-        clearance = StudentClearanceService.submit_clearance(self.student, file)
-
-        self.client.force_authenticate(user=self.staff)
-        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
-
-        response = self.client.patch(
-            url, {'status': ClearanceStatus.APPROVED}, format='json'
-        )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_registrar_review_clearance(self):
         file = SimpleUploadedFile(
@@ -267,6 +253,18 @@ class StudentClearanceAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], ClearanceStatus.APPROVED)
+
+    def test_staff_cannot_review(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+
+        self.client.force_authenticate(user=self.staff)
+        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
+
+        response = self.client.patch(url, {'status': ClearanceStatus.APPROVED})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_student_cannot_review(self):
         file = SimpleUploadedFile(
@@ -431,9 +429,13 @@ class StudentClearanceAPITests(APITestCase):
         req.status = RequestStatus.PROCESSING
         req.save()
 
+        registrar = User.objects.create_user(
+            username='reg1', email='r1@test.com', password='p', role=Role.REGISTRAR
+        )
+
         # Registrar can transition PROCESSING -> READY_FOR_RELEASE
         updated = CredentialRequestService.transition_request(
-            actor=self.registrar,
+            actor=registrar,
             credential_request=req,
             new_status=RequestStatus.READY_FOR_RELEASE,
             remarks="Document is printed and signed."

@@ -346,6 +346,24 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             )
 
         raw_target = str(target_staff_identifier).strip()
+        unverified_statuses = [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.REQUIREMENTS_REJECTED,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+        ]
+        if credential_request.status in unverified_statuses:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot assign staff to an unverified request. "
+                        "Please verify clearance and payment first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         staff_user = User.objects.filter(
             models.Q(username__iexact=raw_target) |
             models.Q(
