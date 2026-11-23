@@ -128,6 +128,10 @@ class NotificationAPITests(APITestCase):
         ctype = CredentialType.objects.create(
             code='TOR', name='Transcript', price=100.00, processing_days=5
         )
+        staff_user = User.objects.create_user(
+            username='staff_intake_test', email='st_intake@test.com',
+            password='p', role=Role.STAFF
+        )
         initial_count = Notification.objects.count()
 
         req = CredentialRequestService.create_request(
@@ -137,8 +141,8 @@ class NotificationAPITests(APITestCase):
                 'status': 'PENDING'
             }
         )
-        # Student + Registrar notified; Admin strictly excluded
-        self.assertEqual(Notification.objects.count(), initial_count + 2)
+        # Student + Registrar + Admin notified; Staff strictly excluded
+        self.assertEqual(Notification.objects.count(), initial_count + 3)
         user_notif = Notification.objects.filter(user=self.user1).latest('created_at')
         self.assertEqual(user_notif.user, self.user1)
         self.assertEqual(user_notif.event_type, NotificationEvent.REQUEST_CREATED)
@@ -151,9 +155,15 @@ class NotificationAPITests(APITestCase):
         self.assertEqual(reg_notif.related_object_type, 'CredentialRequest')
         self.assertEqual(reg_notif.related_object_id, str(req.id))
 
-        self.assertFalse(
+        self.assertTrue(
             Notification.objects.filter(
                 user=self.admin,
+                event_type=NotificationEvent.REQUEST_CREATED,
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=staff_user,
                 event_type=NotificationEvent.REQUEST_CREATED,
             ).exists()
         )
@@ -206,6 +216,10 @@ class NotificationAPITests(APITestCase):
         StudentClearance.objects.get_or_create(
             user=self.user1, defaults={'file': cfile, 'status': ClearanceStatus.PENDING}
         )
+        registrar = User.objects.create_user(
+            username='reg_pay_test', email='reg_pay@test.com',
+            password='p', role=Role.REGISTRAR
+        )
         staff = User.objects.create_user(
             username='staff_test2', email='st2@test.com', password='p', role=Role.STAFF
         )
@@ -216,21 +230,31 @@ class NotificationAPITests(APITestCase):
             actor=self.user1,
             validated_data={'credential_type': ctype, 'status': 'PENDING'}
         )
-        req.assigned_staff = staff
         req.status = RequestStatus.PAYMENT_PENDING
         req.save()
 
-        # 1. Student uploads clearance -> staff notified
+        # 1. Student uploads clearance -> Registrar & Admin notified; Staff excluded
         clearance_file = SimpleUploadedFile(
             "clearance.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         StudentClearanceService.submit_clearance(actor=self.user1, file=clearance_file)
-        clearance_notif = Notification.objects.filter(
-            user=staff, event_type=NotificationEvent.CLEARANCE_SUBMITTED
-        ).latest('created_at')
-        self.assertIn(req.tracking_number, clearance_notif.message)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=registrar, event_type=NotificationEvent.CLEARANCE_SUBMITTED
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.admin, event_type=NotificationEvent.CLEARANCE_SUBMITTED
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=staff, event_type=NotificationEvent.CLEARANCE_SUBMITTED
+            ).exists()
+        )
 
-        # 2. Student uploads payment -> staff notified
+        # 2. Student uploads payment -> Registrar & Admin notified; Staff excluded
         receipt_file = SimpleUploadedFile(
             "receipt.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
@@ -241,7 +265,18 @@ class NotificationAPITests(APITestCase):
             receipt_image=receipt_file,
             receipt_reference_number="OR-NOTIF-1"
         )
-        pay_notif = Notification.objects.filter(
-            user=staff, event_type=NotificationEvent.PAYMENT_SUBMITTED
-        ).latest('created_at')
-        self.assertIn(req.tracking_number, pay_notif.message)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=registrar, event_type=NotificationEvent.PAYMENT_SUBMITTED
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.admin, event_type=NotificationEvent.PAYMENT_SUBMITTED
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=staff, event_type=NotificationEvent.PAYMENT_SUBMITTED
+            ).exists()
+        )

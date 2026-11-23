@@ -419,6 +419,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         if staff_user != request.user:
             NotificationService.create_notification(
                 recipient=staff_user,
+                title=f"Request Assigned ({credential_request.tracking_number})",
                 event_type=NotificationEvent.REQUEST_ASSIGNED,
                 message=(
                     f"Request {credential_request.tracking_number} has been assigned "

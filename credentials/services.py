@@ -312,15 +312,16 @@ class CredentialRequestService:
             related_object_type='CredentialRequest',
         )
 
-        # Notify operational Registrar (Admin is not a request processor)
-        registrar_users = User.objects.filter(
-            role=Role.REGISTRAR,
+        # Notify intake & verification verifiers (Registrar Frontdesk & Admin)
+        intake_users = User.objects.filter(
+            role__in=[Role.REGISTRAR, Role.ADMIN],
             is_active=True
         )
-        for reg_user in registrar_users:
-            if reg_user != actor:
+        for staff_or_admin in intake_users:
+            if staff_or_admin != actor:
                 NotificationService.create_notification(
-                    recipient=reg_user,
+                    recipient=staff_or_admin,
+                    title="New Request Submitted",
                     event_type=NotificationEvent.REQUEST_CREATED,
                     message=(
                         f"New credential request "
@@ -331,22 +332,6 @@ class CredentialRequestService:
                     related_object_type='CredentialRequest',
                     related_object_id=str(credential_request.id)
                 )
-
-        if (
-            credential_request.assigned_staff and
-            credential_request.assigned_staff not in registrar_users and
-            credential_request.assigned_staff != actor
-        ):
-            NotificationService.create_notification(
-                recipient=credential_request.assigned_staff,
-                event_type=NotificationEvent.REQUEST_CREATED,
-                message=(
-                    f"New credential request ({credential_request.tracking_number}) "
-                    f"assigned to you by {actor.username}."
-                ),
-                related_object_type='CredentialRequest',
-                related_object_id=str(credential_request.id)
-            )
 
         return credential_request
 
@@ -464,6 +449,9 @@ class CredentialRequestService:
                 if new_assigned_user != prev_staff and new_assigned_user != actor:
                     NotificationService.create_notification(
                         recipient=new_assigned_user,
+                        title=(
+                            f"Request Assigned ({credential_request.tracking_number})"
+                        ),
                         event_type=NotificationEvent.REQUEST_ASSIGNED,
                         message=(
                             f"Request {credential_request.tracking_number} has been "
@@ -723,6 +711,24 @@ class CredentialRequestService:
                     send_email=True,
                     event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
                 )
+                if (
+                    credential_request.assigned_staff and
+                    credential_request.assigned_staff != actor
+                ):
+                    NotificationService.create_notification(
+                        recipient=credential_request.assigned_staff,
+                        title=(
+                            f"Request Ready for Processing "
+                            f"({credential_request.tracking_number})"
+                        ),
+                        event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                        message=(
+                            f"Request {credential_request.tracking_number} has been "
+                            "verified and is ready for processing."
+                        ),
+                        related_object_type='CredentialRequest',
+                        related_object_id=str(credential_request.id),
+                    )
             elif canonical_status == RequestStatus.READY_FOR_RELEASE:
                 title = f"Ready for Release ({credential_request.tracking_number})"
                 msg = (
@@ -758,6 +764,40 @@ class CredentialRequestService:
                     send_email=True,
                     event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
                 )
+            elif canonical_status == RequestStatus.RELEASED:
+                title = f"Document Released ({credential_request.tracking_number})"
+                msg = (
+                    f"Your credential request ({credential_request.tracking_number}) "
+                    "has been released/completed."
+                )
+                NotificationService.send_request_notification(
+                    user=credential_request.user,
+                    title=title,
+                    message=msg,
+                    reference_id=str(credential_request.id),
+                    send_email=True,
+                    event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                )
+            elif canonical_status == RequestStatus.PAYMENT_VERIFIED:
+                # Student notification handled by PaymentService.verify_payment.
+                if (
+                    credential_request.assigned_staff and
+                    credential_request.assigned_staff != actor
+                ):
+                    NotificationService.create_notification(
+                        recipient=credential_request.assigned_staff,
+                        title=(
+                            f"Request Ready for Processing "
+                            f"({credential_request.tracking_number})"
+                        ),
+                        event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
+                        message=(
+                            f"Request {credential_request.tracking_number} has been "
+                            "verified and is ready for processing."
+                        ),
+                        related_object_type='CredentialRequest',
+                        related_object_id=str(credential_request.id),
+                    )
             else:
                 msg = (
                     f"Your request ({credential_request.tracking_number}) "
@@ -765,6 +805,9 @@ class CredentialRequestService:
                 )
                 NotificationService.create_notification(
                     recipient=credential_request.user,
+                    title=(
+                        f"Request Status Update ({credential_request.tracking_number})"
+                    ),
                     event_type=NotificationEvent.REQUEST_STATUS_CHANGED,
                     message=msg,
                     related_object_type='CredentialRequest',
@@ -974,47 +1017,20 @@ class StudentClearanceService:
             }
         )
 
-        active_requests = CredentialRequest.objects.filter(
-            user=actor
-        ).exclude(
-            status__in=[
-                RequestStatus.RELEASED,
-                RequestStatus.REJECTED,
-                RequestStatus.CANCELLED
-            ]
+        intake_users = User.objects.filter(
+            role__in=[Role.REGISTRAR, Role.ADMIN],
+            is_active=True
         )
-        notified_staff = set()
-        for req in active_requests:
-            if (
-                req.assigned_staff and
-                req.assigned_staff not in notified_staff and
-                req.assigned_staff != actor
-            ):
+        for verifier in intake_users:
+            if verifier != actor:
                 NotificationService.create_notification(
-                    recipient=req.assigned_staff,
+                    recipient=verifier,
+                    title="Clearance Uploaded",
                     event_type=NotificationEvent.CLEARANCE_SUBMITTED,
-                    message=(
-                        f"Student clearance uploaded by {actor.username} "
-                        f"for request {req.tracking_number}."
-                    ),
+                    message=f"Student clearance uploaded by {actor.username}.",
                     related_object_type='StudentClearance',
                     related_object_id=str(clearance.id)
                 )
-                notified_staff.add(req.assigned_staff)
-
-        if not notified_staff:
-            registrars = User.objects.filter(
-                role=Role.REGISTRAR, is_active=True
-            )
-            for reg_user in registrars:
-                if reg_user != actor:
-                    NotificationService.create_notification(
-                        recipient=reg_user,
-                        event_type=NotificationEvent.CLEARANCE_SUBMITTED,
-                        message=f"Student clearance uploaded by {actor.username}.",
-                        related_object_type='StudentClearance',
-                        related_object_id=str(clearance.id)
-                    )
 
         return clearance
 
@@ -1089,9 +1105,11 @@ class StudentClearanceService:
                 else NotificationEvent.CLEARANCE_REJECTED
             )
             msg = f"Your student clearance has been {canonical_status.lower()}."
+            title = f"Clearance {canonical_status.capitalize()}"
 
             NotificationService.create_notification(
                 recipient=clearance.user,
+                title=title,
                 event_type=notification_event,
                 message=msg,
                 related_object_type='StudentClearance',
@@ -1185,34 +1203,23 @@ class PaymentService:
             }
         )
 
-        target_staff = request.assigned_staff
-        if target_staff and target_staff != actor:
-            NotificationService.create_notification(
-                recipient=target_staff,
-                event_type=NotificationEvent.PAYMENT_SUBMITTED,
-                message=(
-                    f"Payment receipt uploaded for request {request.tracking_number} "
-                    f"by {actor.username}."
-                ),
-                related_object_type='Payment',
-                related_object_id=str(payment.id)
-            )
-        else:
-            registrars = User.objects.filter(
-                role=Role.REGISTRAR, is_active=True
-            )
-            for reg_user in registrars:
-                if reg_user != actor:
-                    NotificationService.create_notification(
-                        recipient=reg_user,
-                        event_type=NotificationEvent.PAYMENT_SUBMITTED,
-                        message=(
-                            f"Payment receipt uploaded for request "
-                            f"{request.tracking_number} by {actor.username}."
-                        ),
-                        related_object_type='Payment',
-                        related_object_id=str(payment.id)
-                    )
+        intake_users = User.objects.filter(
+            role__in=[Role.REGISTRAR, Role.ADMIN],
+            is_active=True
+        )
+        for verifier in intake_users:
+            if verifier != actor:
+                NotificationService.create_notification(
+                    recipient=verifier,
+                    title="Payment Submitted",
+                    event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                    message=(
+                        f"Payment receipt uploaded for request "
+                        f"{request.tracking_number} by {actor.username}."
+                    ),
+                    related_object_type='Payment',
+                    related_object_id=str(payment.id)
+                )
 
         return payment
 
