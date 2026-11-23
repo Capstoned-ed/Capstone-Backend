@@ -180,10 +180,12 @@ class NotificationAPITests(APITestCase):
             actor=self.user1,
             validated_data={'credential_type': ctype, 'status': 'PENDING'}
         )
+        req.status = RequestStatus.PROCESSING
+        req.save()
         CredentialRequestService.transition_request(
             actor=self.admin,
             credential_request=req,
-            new_status=RequestStatus.PENDING,
+            new_status=RequestStatus.PROCESSING,
             assigned_staff=staff
         )
         staff_notif = Notification.objects.filter(user=staff).latest('created_at')

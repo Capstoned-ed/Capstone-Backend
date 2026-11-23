@@ -439,6 +439,18 @@ class CredentialRequestService:
                     new_assigned_user = s_user
 
             if new_assigned_user:
+                unverified_statuses = [
+                    RequestStatus.PENDING,
+                    RequestStatus.REQUIREMENTS_VERIFICATION,
+                    RequestStatus.REQUIREMENTS_REJECTED,
+                    RequestStatus.PAYMENT_PENDING,
+                    RequestStatus.FOR_VERIFICATION,
+                ]
+                if canonical_status in unverified_statuses:
+                    raise ValidationError(
+                        "Cannot assign staff to an unverified request. "
+                        "Please verify clearance and payment first."
+                    )
                 if (
                     new_assigned_user.role != Role.STAFF or
                     not new_assigned_user.is_active
