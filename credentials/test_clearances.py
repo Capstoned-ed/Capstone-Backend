@@ -27,6 +27,9 @@ class StudentClearanceServiceTests(TestCase):
         self.student = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
         )
+        self.registrar = User.objects.create_user(
+            username='reg1', email='reg@test.com', password='p', role=Role.REGISTRAR
+        )
         self.staff = User.objects.create_user(
             username='staff1', email='st@test.com', password='p', role=Role.STAFF
         )
@@ -51,7 +54,7 @@ class StudentClearanceServiceTests(TestCase):
         clearance = StudentClearanceService.submit_clearance(self.student, file1)
 
         StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.REJECTED, "Blurry"
+            self.registrar, clearance, ClearanceStatus.REJECTED, "Blurry"
         )
         self.assertEqual(clearance.status, ClearanceStatus.REJECTED)
 
@@ -68,7 +71,7 @@ class StudentClearanceServiceTests(TestCase):
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
         StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.APPROVED
+            self.registrar, clearance, ClearanceStatus.APPROVED
         )
 
         with self.assertRaises(ValidationError):
@@ -81,11 +84,11 @@ class StudentClearanceServiceTests(TestCase):
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
         updated = StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.APPROVED
+            self.registrar, clearance, ClearanceStatus.APPROVED
         )
 
         self.assertEqual(updated.status, ClearanceStatus.APPROVED)
-        self.assertEqual(updated.reviewed_by, self.staff)
+        self.assertEqual(updated.reviewed_by, self.registrar)
         self.assertIsNotNone(updated.reviewed_at)
 
         self.assertTrue(AuditLog.objects.filter(action='CLEARANCE_APPROVED').exists())
@@ -102,7 +105,7 @@ class StudentClearanceServiceTests(TestCase):
 
         with self.assertRaises(ValidationError):
             StudentClearanceService.review_clearance(
-                self.staff, clearance, ClearanceStatus.REJECTED, ""
+                self.registrar, clearance, ClearanceStatus.REJECTED, ""
             )
 
     def test_review_invalid_state(self):
@@ -111,12 +114,23 @@ class StudentClearanceServiceTests(TestCase):
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
         StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.APPROVED
+            self.registrar, clearance, ClearanceStatus.APPROVED
         )
 
         with self.assertRaises(ValidationError):
             StudentClearanceService.review_clearance(
-                self.staff, clearance, ClearanceStatus.REJECTED, "remarks"
+                self.registrar, clearance, ClearanceStatus.REJECTED, "remarks"
+            )
+
+    def test_staff_cannot_review_clearance(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+        from rest_framework.exceptions import PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            StudentClearanceService.review_clearance(
+                self.staff, clearance, ClearanceStatus.APPROVED
             )
 
 
@@ -124,6 +138,9 @@ class CredentialRequestValidationTests(TestCase):
     def setUp(self):
         self.student = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
+        )
+        self.registrar = User.objects.create_user(
+            username='reg1', email='reg@test.com', password='p', role=Role.REGISTRAR
         )
         self.staff = User.objects.create_user(
             username='staff1', email='st@test.com', password='p', role=Role.STAFF
@@ -157,7 +174,7 @@ class CredentialRequestValidationTests(TestCase):
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
         StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.REJECTED, remarks='Blurry image'
+            self.registrar, clearance, ClearanceStatus.REJECTED, remarks='Blurry image'
         )
 
         with self.assertRaises(ValidationError):
@@ -172,7 +189,7 @@ class CredentialRequestValidationTests(TestCase):
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
         StudentClearanceService.review_clearance(
-            self.staff, clearance, ClearanceStatus.APPROVED
+            self.registrar, clearance, ClearanceStatus.APPROVED
         )
 
         req = CredentialRequestService.create_request(
@@ -204,6 +221,9 @@ class StudentClearanceAPITests(APITestCase):
         self.student = User.objects.create_user(
             username='stud1', email='s1@test.com', password='p', role=Role.STUDENT
         )
+        self.registrar = User.objects.create_user(
+            username='reg_clear', email='rc@test.com', password='p', role=Role.REGISTRAR
+        )
         self.staff = User.objects.create_user(
             username='staff1', email='st@test.com', password='p', role=Role.STAFF
         )
@@ -219,13 +239,27 @@ class StudentClearanceAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['status'], ClearanceStatus.PENDING)
 
-    def test_staff_review_clearance(self):
+    def test_staff_cannot_review_clearance(self):
         file = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
         self.client.force_authenticate(user=self.staff)
+        url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
+
+        response = self.client.patch(
+            url, {'status': ClearanceStatus.APPROVED}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_registrar_review_clearance(self):
+        file = SimpleUploadedFile(
+            "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
+        )
+        clearance = StudentClearanceService.submit_clearance(self.student, file)
+
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
 
         response = self.client.patch(
@@ -280,13 +314,13 @@ class StudentClearanceAPITests(APITestCase):
         res = self.client.get(url)
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_staff_review_clearance_with_verified_status(self):
+    def test_registrar_review_clearance_with_verified_status(self):
         file = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
 
         response = self.client.patch(
@@ -295,13 +329,13 @@ class StudentClearanceAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], ClearanceStatus.APPROVED)
 
-    def test_staff_review_clearance_idempotent(self):
+    def test_registrar_review_clearance_idempotent(self):
         file = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
 
         # First review: Approve
@@ -314,13 +348,13 @@ class StudentClearanceAPITests(APITestCase):
         self.assertEqual(res2.status_code, status.HTTP_200_OK)
         self.assertEqual(res2.data['status'], ClearanceStatus.APPROVED)
 
-    def test_staff_review_clearance_reject_requires_remarks(self):
+    def test_registrar_review_clearance_reject_requires_remarks(self):
         file = SimpleUploadedFile(
             "c.pdf", b"%PDF-1.4\n", content_type="application/pdf"
         )
         clearance = StudentClearanceService.submit_clearance(self.student, file)
 
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.id})
 
         # Reject without remarks causes 400
@@ -397,13 +431,9 @@ class StudentClearanceAPITests(APITestCase):
         req.status = RequestStatus.PROCESSING
         req.save()
 
-        registrar = User.objects.create_user(
-            username='reg1', email='r1@test.com', password='p', role=Role.REGISTRAR
-        )
-
         # Registrar can transition PROCESSING -> READY_FOR_RELEASE
         updated = CredentialRequestService.transition_request(
-            actor=registrar,
+            actor=self.registrar,
             credential_request=req,
             new_status=RequestStatus.READY_FOR_RELEASE,
             remarks="Document is printed and signed."

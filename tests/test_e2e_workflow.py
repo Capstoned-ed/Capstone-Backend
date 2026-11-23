@@ -123,8 +123,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         clearance_id = resp.data['id']
         self.assertEqual(resp.data['status'], ClearanceStatus.PENDING)
 
-        # Step 2: Staff reviews & approves Clearance
-        self.client.force_authenticate(user=self.staff)
+        # Step 2: Registrar reviews & approves Clearance
+        self.client.force_authenticate(user=self.registrar)
         review_url = reverse(
             'studentclearance-review', kwargs={'pk': clearance_id}
         )
@@ -159,8 +159,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
 
-        # Step 5: Staff transitions Request to REQUIREMENTS_VERIFICATION
-        self.client.force_authenticate(user=self.staff)
+        # Step 5: Registrar transitions Request to REQUIREMENTS_VERIFICATION
+        self.client.force_authenticate(user=self.registrar)
         transition_url = reverse(
             'credentialrequest-transition', kwargs={'pk': req_id}
         )
@@ -169,7 +169,7 @@ class EndToEndWorkflowAPITests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
 
-        # Step 6: Staff verifies requirements -> PAYMENT_PENDING
+        # Step 6: Registrar verifies requirements -> PAYMENT_PENDING
         resp = self.client.patch(
             transition_url, {'status': 'PAYMENT_PENDING'}, format='json'
         )
@@ -192,8 +192,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         payment_id = resp.data['id']
         self.assertEqual(resp.data['status'], 'PENDING')
 
-        # Step 8: Staff verifies Payment -> Request transitions to PAYMENT_VERIFIED
-        self.client.force_authenticate(user=self.staff)
+        # Step 8: Registrar verifies Payment -> Request transitions to PAYMENT_VERIFIED
+        self.client.force_authenticate(user=self.registrar)
         verify_url = reverse('payment-verify', kwargs={'pk': payment_id})
         resp = self.client.patch(
             verify_url, {'action': 'VERIFY'}, format='json'
@@ -238,16 +238,25 @@ class EndToEndWorkflowAPITests(APITestCase):
         self.assertIn('DOCUMENT_UPLOADED', actions)
         self.assertIn('PAYMENT_SUBMITTED', actions)
 
+        registrar_actions = list(
+            AuditLog.objects.filter(actor=self.registrar).values_list(
+                'action', flat=True
+            )
+        )
+        self.assertIn('CLEARANCE_APPROVED', registrar_actions)
+        self.assertIn('PAYMENT_VERIFICATION_VERIFY', registrar_actions)
+        self.assertTrue(
+            any(a.startswith('REQUEST_STATUS_CHANGED_') for a in registrar_actions)
+        )
+
         staff_actions = list(
             AuditLog.objects.filter(actor=self.staff).values_list(
                 'action', flat=True
             )
         )
-        self.assertIn('CLEARANCE_APPROVED', staff_actions)
         self.assertTrue(
             any(a.startswith('REQUEST_STATUS_CHANGED_') for a in staff_actions)
         )
-        self.assertIn('PAYMENT_VERIFICATION_VERIFY', staff_actions)
 
         # Step 13: Verify Notifications for Student 1
         notifs = list(
@@ -285,8 +294,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
 
-        # Staff rejects clearance
-        self.client.force_authenticate(user=self.staff)
+        # Registrar rejects clearance
+        self.client.force_authenticate(user=self.registrar)
         review_url = reverse(
             'studentclearance-review', kwargs={'pk': clearance_id}
         )
@@ -312,8 +321,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         new_clearance_id = resp.data['id']
 
-        # Staff approves new clearance
-        self.client.force_authenticate(user=self.staff)
+        # Registrar approves new clearance
+        self.client.force_authenticate(user=self.registrar)
         new_review_url = reverse(
             'studentclearance-review', kwargs={'pk': new_clearance_id}
         )
@@ -346,8 +355,8 @@ class EndToEndWorkflowAPITests(APITestCase):
             status='REQUIREMENTS_VERIFICATION',
         )
 
-        # Staff attempts to reject without remarks -> Fails (400)
-        self.client.force_authenticate(user=self.staff)
+        # Registrar attempts to reject without remarks -> Fails (400)
+        self.client.force_authenticate(user=self.registrar)
         transition_url = reverse(
             'credentialrequest-transition', kwargs={'pk': req.id}
         )
@@ -356,7 +365,7 @@ class EndToEndWorkflowAPITests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
 
-        # Staff rejects with mandatory remarks -> Succeeds
+        # Registrar rejects with mandatory remarks -> Succeeds
         resp = self.client.patch(
             transition_url,
             {
@@ -399,8 +408,8 @@ class EndToEndWorkflowAPITests(APITestCase):
             status='PENDING',
         )
 
-        # Staff rejects payment due to blurry image
-        self.client.force_authenticate(user=self.staff)
+        # Registrar rejects payment due to blurry image
+        self.client.force_authenticate(user=self.registrar)
         verify_url = reverse('payment-verify', kwargs={'pk': payment1.id})
         resp = self.client.patch(
             verify_url,
@@ -431,8 +440,8 @@ class EndToEndWorkflowAPITests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         payment2_id = resp.data['id']
 
-        # Staff verifies payment attempt #2
-        self.client.force_authenticate(user=self.staff)
+        # Registrar verifies payment attempt #2
+        self.client.force_authenticate(user=self.registrar)
         verify_url2 = reverse('payment-verify', kwargs={'pk': payment2_id})
         resp = self.client.patch(
             verify_url2, {'action': 'VERIFY'}, format='json'
