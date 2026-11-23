@@ -213,19 +213,35 @@ class SelfProfileUpdateSerializer(serializers.ModelSerializer):
     """
     Allows an authenticated user to update their own contact & profile info.
     """
+    first_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    middle_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    last_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=''
+    )
+    name_extension = serializers.CharField(
+        max_length=30, required=False, allow_blank=True, default=''
+    )
+
     class Meta:
         model = User
         fields = [
+            'first_name', 'middle_name', 'last_name', 'name_extension',
             'email', 'birth_date', 'contact_number',
-            'year_level', 'middle_name', 'name_extension',
+            'year_level',
         ]
         extra_kwargs = {
+            'first_name': {'required': False},
+            'middle_name': {'required': False},
+            'last_name': {'required': False},
+            'name_extension': {'required': False},
             'email': {'required': False},
             'birth_date': {'required': False, 'allow_null': True},
             'contact_number': {'required': False},
             'year_level': {'required': False},
-            'middle_name': {'required': False},
-            'name_extension': {'required': False},
         }
 
 
