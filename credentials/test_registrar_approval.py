@@ -106,9 +106,9 @@ class RegistrarApprovalWorkflowTests(TestCase):
         self.assertEqual(req.status, RequestStatus.PENDING)
         self.assertFalse(req.is_approved)
 
-        # Staff transitions to PAYMENT_PENDING (Order of Payment confirmed)
+        # Registrar transitions to PAYMENT_PENDING (Order of Payment confirmed)
         updated = CredentialRequestService.transition_request(
-            actor=self.staff,
+            actor=self.registrar,
             credential_request=req,
             new_status=RequestStatus.PAYMENT_PENDING
         )
@@ -117,9 +117,9 @@ class RegistrarApprovalWorkflowTests(TestCase):
         self.assertEqual(updated.approved_by_name, 'Jonalin Lagrada')
         self.assertEqual(updated.approved_by, self.registrar)
 
-        # Staff verifies payment and moves to PROCESSING
+        # Registrar verifies payment and moves to PROCESSING
         updated = CredentialRequestService.transition_request(
-            actor=self.staff,
+            actor=self.registrar,
             credential_request=updated,
             new_status=RequestStatus.PAYMENT_VERIFIED
         )
@@ -153,9 +153,9 @@ class RegistrarApprovalWorkflowTests(TestCase):
             validated_data={'credential_type': self.cred_type}
         )
 
-        # Staff transitions to PAYMENT_PENDING and PAYMENT_VERIFIED
+        # Registrar transitions to PAYMENT_PENDING and PAYMENT_VERIFIED
         req = CredentialRequestService.transition_request(
-            actor=self.staff,
+            actor=self.registrar,
             credential_request=req,
             new_status=RequestStatus.PAYMENT_PENDING
         )
@@ -163,7 +163,7 @@ class RegistrarApprovalWorkflowTests(TestCase):
         self.assertEqual(req.approved_by_name, '')
 
         req = CredentialRequestService.transition_request(
-            actor=self.staff,
+            actor=self.registrar,
             credential_request=req,
             new_status=RequestStatus.PAYMENT_VERIFIED
         )

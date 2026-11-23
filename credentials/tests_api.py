@@ -70,12 +70,24 @@ class CredentialRequestAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_role_based_list_access(self):
-        """Staff, Registrar, and Admin should see all requests."""
-        for user in [self.staff, self.registrar, self.admin]:
+        """Registrar and Admin see all requests; Staff sees verified requests."""
+        for user in [self.registrar, self.admin]:
             self.client.force_authenticate(user=user)
             response = self.client.get(self.url_list)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             self.assertEqual(len(response.data), 2)
+
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.get(self.url_list)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 0)
+
+        # Once moved to PROCESSING, Staff sees it
+        self.req1.status = 'PROCESSING'
+        self.req1.save()
+        response = self.client.get(self.url_list)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
 
     def test_student_can_create_request_audited(self):
         self.client.force_authenticate(user=self.student1)
@@ -123,8 +135,8 @@ class CredentialRequestAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_transition_endpoint_success(self):
-        """Staff can transition PENDING to REQUIREMENTS_VERIFICATION."""
-        self.client.force_authenticate(user=self.staff)
+        """Registrar can transition PENDING to REQUIREMENTS_VERIFICATION."""
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
         response = self.client.patch(
             url, {'status': 'REQUIREMENTS_VERIFICATION'}, format='json')
@@ -133,20 +145,22 @@ class CredentialRequestAPITests(APITestCase):
         self.assertEqual(self.req1.status, 'REQUIREMENTS_VERIFICATION')
 
     def test_staff_can_update_remarks_same_status(self):
-        """Staff can update remarks and assign staff while keeping current status."""
+        """Staff can update remarks and assign staff on verified requests."""
+        self.req1.status = 'PROCESSING'
+        self.req1.save()
         self.client.force_authenticate(user=self.staff)
         url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
         response = self.client.patch(
             url,
             {
-                'status': 'PENDING',
+                'status': 'PROCESSING',
                 'remarks': '[Assigned to: staff_user] Processing notes'
             },
             format='json'
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.req1.refresh_from_db()
-        self.assertEqual(self.req1.status, 'PENDING')
+        self.assertEqual(self.req1.status, 'PROCESSING')
         self.assertIn('[Assigned to: staff_user]', self.req1.remarks)
         self.assertEqual(response.data['assigned_staff'], 'staff_user')
 
@@ -169,10 +183,10 @@ class CredentialRequestAPITests(APITestCase):
         self.assertIn('permission', str(response.data).lower())
 
     def test_transition_requires_remarks_for_rejection(self):
-        """Staff rejecting a request without remarks should fail."""
+        """Registrar rejecting a request without remarks should fail."""
         self.req1.status = 'REQUIREMENTS_VERIFICATION'
         self.req1.save()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
         response = self.client.patch(url, {'status': 'REJECTED'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -443,6 +457,9 @@ class PaymentAPITests(APITestCase):
         self.student1 = User.objects.create_user(
             username='stud_p1', email='p1@test.com', password='p', role=Role.STUDENT
         )
+        self.registrar = User.objects.create_user(
+            username='reg_p', email='rp@test.com', password='p', role=Role.REGISTRAR
+        )
         self.staff = User.objects.create_user(
             username='staff_p', email='sp@test.com', password='p', role=Role.STAFF
         )
@@ -477,14 +494,20 @@ class PaymentAPITests(APITestCase):
             request=self.req1, amount=Decimal('500.00'),
             receipt_image=file, status='PENDING'
         )
+        # Staff is forbidden from verifying payments
         self.client.force_authenticate(user=self.staff)
         url = reverse('payment-verify', kwargs={'pk': payment.id})
+        res = self.client.patch(url, {'action': 'VERIFY'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Registrar verifies payment
+        self.client.force_authenticate(user=self.registrar)
         res = self.client.patch(url, {'action': 'VERIFY'}, format='json')
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
         payment.refresh_from_db()
         self.assertEqual(payment.status, 'VERIFIED')
-        self.assertEqual(payment.verified_by, self.staff)
+        self.assertEqual(payment.verified_by, self.registrar)
 
         self.req1.refresh_from_db()
         self.assertEqual(self.req1.status, 'PAYMENT_VERIFIED')
@@ -497,7 +520,7 @@ class PaymentAPITests(APITestCase):
             request=self.req1, amount=Decimal('500.00'),
             receipt_image=file, status='PENDING'
         )
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('payment-verify', kwargs={'pk': payment.id})
         res = self.client.patch(
             url, {'action': 'REJECT', 'remarks': 'Blurry receipt'}, format='json')

@@ -216,7 +216,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
             (RequestStatus.RELEASED, RequestStatus.PENDING, self.admin),
             (RequestStatus.RELEASED, RequestStatus.PROCESSING, self.registrar),
             (RequestStatus.REJECTED, RequestStatus.PROCESSING, self.registrar),
-            (RequestStatus.CANCELLED, RequestStatus.PAYMENT_PENDING, self.staff),
+            (RequestStatus.CANCELLED, RequestStatus.PAYMENT_PENDING, self.registrar),
             (
                 RequestStatus.PAYMENT_PENDING,
                 RequestStatus.READY_FOR_RELEASE,
@@ -224,8 +224,8 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
             ),
             (
                 RequestStatus.PROCESSING,
-                RequestStatus.PAYMENT_VERIFIED,
-                self.staff,
+                RequestStatus.PAYMENT_PENDING,
+                self.registrar,
             ),
         ]
 
@@ -334,13 +334,13 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
         resp = self.client.patch(
             url, {'status': RequestStatus.PROCESSING}, format='json'
         )
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(AuditLog.objects.count(), initial_log_count)
 
     def test_unauthorized_actions_do_not_create_audit_log(self):
         initial_log_count = AuditLog.objects.count()
         self.client.force_authenticate(user=self.student1)
-        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.id})
+        url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
         resp = self.client.patch(
             url, {'status': RequestStatus.REQUIREMENTS_VERIFICATION}, format='json'
         )
@@ -349,7 +349,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
 
     def test_failed_payment_verification_attempts_do_not_create_audit_log(self):
         initial_log_count = AuditLog.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('payment-verify', kwargs={'pk': self.payment1.pk})
         # REJECT requires remarks; omitting remarks causes 400 failure
         resp = self.client.patch(url, {'action': 'REJECT'}, format='json')
@@ -369,7 +369,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
             file=self.get_valid_pdf("c_pend.pdf"),
         )
         initial_log_count = AuditLog.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.pk})
         # REJECT requires remarks; omitting remarks causes 400 failure
         resp = self.client.patch(url, {'status': ClearanceStatus.REJECTED})
@@ -381,7 +381,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
     # -------------------------------------------------------------------------
     def test_notifications_created_only_after_successful_state_transitions(self):
         initial_notif_count = Notification.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('payment-verify', kwargs={'pk': self.payment1.pk})
         resp = self.client.patch(url, {'action': 'VERIFY'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
@@ -389,7 +389,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
 
     def test_invalid_transitions_generate_no_notifications(self):
         initial_notif_count = Notification.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('credentialrequest-transition', kwargs={'pk': self.req1.id})
         resp = self.client.patch(
             url, {'status': RequestStatus.RELEASED}, format='json'
@@ -409,7 +409,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
 
     def test_failed_payment_verification_generates_no_notification(self):
         initial_notif_count = Notification.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('payment-verify', kwargs={'pk': self.payment1.pk})
         resp = self.client.patch(
             url, {'action': 'INVALID_ACTION'}, format='json'
@@ -430,7 +430,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
             file=self.get_valid_pdf("c_pend2.pdf"),
         )
         initial_notif_count = Notification.objects.count()
-        self.client.force_authenticate(user=self.staff)
+        self.client.force_authenticate(user=self.registrar)
         url = reverse('studentclearance-review', kwargs={'pk': clearance.pk})
         resp = self.client.patch(url, {'status': 'INVALID_STATUS'})
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
