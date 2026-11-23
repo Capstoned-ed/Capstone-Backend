@@ -22,11 +22,38 @@ def send_request_notification(
     """
     Centralized notification dispatcher:
     1. Creates exactly one in-app Notification record (idempotent / deduplicated).
+       Deduplicates by (user, title, reference_id) within a 60-second window,
+       ignoring slight differences in message text.
     2. Asynchronously sends an email notification via Django SMTP if user has email.
     """
     rel_id_str = str(reference_id) if reference_id is not None else None
+    cutoff = timezone.now() - timedelta(seconds=60)
+
+    # Strict deduplication check by (user, title, reference_id) within 60s
+    existing_qs = Notification.objects.filter(
+        user=user,
+        created_at__gte=cutoff,
+    )
+    if title:
+        existing_qs = existing_qs.filter(title=title)
+    if rel_id_str:
+        existing_qs = existing_qs.filter(related_object_id=rel_id_str)
+    elif event_type:
+        existing_qs = existing_qs.filter(event_type=event_type)
+
+    existing_notif = existing_qs.first()
+    if existing_notif:
+        logger.info(
+            "Deduplicated notification for user %s, title %s, ref %s",
+            getattr(user, 'username', user),
+            title,
+            rel_id_str,
+        )
+        return existing_notif
+
     notification = NotificationService.create_notification(
         recipient=user,
+        title=title,
         event_type=event_type,
         message=message,
         related_object_type=related_object_type,
@@ -85,13 +112,14 @@ class NotificationService:
         recipient,
         event_type,
         message,
+        title='',
         related_object_type=None,
         related_object_id=None,
     ):
         """
         Creates a notification synchronously with strict idempotency / deduplication.
-        Prevents duplicate notifications for the same recipient, event, and reference ID
-        within a 60-second window.
+        Prevents duplicate notifications for the same recipient, title/event, and
+        reference ID within a 60-second window, ignoring slight message differences.
         """
         rel_id_str = str(related_object_id) if related_object_id is not None else None
         cutoff = timezone.now() - timedelta(seconds=60)
@@ -99,9 +127,13 @@ class NotificationService:
         # Idempotency guard: prevent duplicate notifications
         qs = Notification.objects.filter(
             user=recipient,
-            event_type=event_type,
             created_at__gte=cutoff,
         )
+        if title:
+            qs = qs.filter(title=title)
+        else:
+            qs = qs.filter(event_type=event_type)
+
         if rel_id_str:
             existing = qs.filter(related_object_id=rel_id_str).first()
             if existing:
@@ -113,6 +145,7 @@ class NotificationService:
 
         notification = Notification(
             user=recipient,
+            title=title or '',
             event_type=event_type,
             message=message,
             related_object_type=related_object_type,

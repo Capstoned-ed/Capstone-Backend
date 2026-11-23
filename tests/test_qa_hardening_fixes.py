@@ -712,9 +712,11 @@ class QAHardeningFixesTests(APITestCase):
         self.assertEqual(student.year_level, '3rd year')
 
     def test_credential_request_creation_generates_single_student_notification(self):
-        """Submitting a request generates exactly one notification for student."""
+        """Submitting a request creates exactly 1 student notification and 1 email."""
+        mail.outbox = []
         student = User.objects.create_user(
             username='single_notif_student',
+            first_name='StudentName',
             password='password123',
             email='single_notif@test.com',
             role=Role.STUDENT,
@@ -734,8 +736,56 @@ class QAHardeningFixesTests(APITestCase):
         res = self.client.post(url, payload, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
 
-        student_notifs = Notification.objects.filter(
-            user=student,
-            event_type=NotificationEvent.REQUEST_CREATED,
+        self.assertEqual(
+            Notification.objects.filter(
+                user=student,
+                title="Request Submitted"
+            ).count(),
+            1
         )
-        self.assertEqual(student_notifs.count(), 1)
+        time.sleep(0.1)
+        student_emails = [m for m in mail.outbox if 'single_notif@test.com' in m.to]
+        self.assertEqual(len(student_emails), 1)
+
+    def test_send_request_notification_deduplicates_by_title_and_reference(self):
+        """Deduplicates by (user, title, ref) ignoring slight message differences."""
+        mail.outbox = []
+        user = User.objects.create_user(
+            username='dedup_title_user',
+            first_name='Daisy',
+            password='password123',
+            email='dedup_title@ustp.edu.ph',
+            role=Role.STUDENT,
+        )
+        notif1 = NotificationService.send_request_notification(
+            user=user,
+            title="Request Submitted",
+            message=(
+                "Your credential request (REQ-1) for Diploma has been submitted "
+                "successfully. Status: Pending."
+            ),
+            reference_id="REQ-1",
+            send_email=True,
+        )
+        # Call again with slightly different message wording within 60 seconds
+        notif2 = NotificationService.send_request_notification(
+            user=user,
+            title="Request Submitted",
+            message=(
+                "Your credential request (REQ-1) for Diploma has been submitted. "
+                "Status: Pending."
+            ),
+            reference_id="REQ-1",
+            send_email=True,
+        )
+        self.assertEqual(notif1.id, notif2.id)
+        self.assertEqual(
+            Notification.objects.filter(
+                user=user,
+                title="Request Submitted"
+            ).count(),
+            1
+        )
+        time.sleep(0.1)
+        # Exactly 1 email sent, second duplicate invocation was skipped
+        self.assertEqual(len(mail.outbox), 1)

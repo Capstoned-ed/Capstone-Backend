@@ -294,7 +294,7 @@ class CredentialRequestService:
 
         NotificationService.send_request_notification(
             user=actor,
-            title=f"Request Submitted ({credential_request.tracking_number})",
+            title="Request Submitted",
             message=(
                 f"Your credential request ({credential_request.tracking_number}) "
                 f"for {credential_request.credential_type.name} has been submitted "
