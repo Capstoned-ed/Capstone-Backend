@@ -8,6 +8,7 @@ from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
@@ -201,9 +202,17 @@ class QAHardeningFixesTests(APITestCase):
         req.refresh_from_db()
         self.assertEqual(req.status, RequestStatus.FOR_VERIFICATION)
 
-        # Staff verifies payment -> transitions to PAYMENT_VERIFIED
+        # Staff cannot verify payment -> raises PermissionDenied
+        with self.assertRaises(PermissionDenied):
+            PaymentService.verify_payment(
+                actor=self.staff1,
+                payment=payment,
+                action='VERIFY'
+            )
+
+        # Registrar verifies payment -> transitions to PAYMENT_VERIFIED
         PaymentService.verify_payment(
-            actor=self.staff1,
+            actor=self.registrar,
             payment=payment,
             action='VERIFY'
         )
@@ -789,3 +798,128 @@ class QAHardeningFixesTests(APITestCase):
         time.sleep(0.1)
         # Exactly 1 email sent, second duplicate invocation was skipped
         self.assertEqual(len(mail.outbox), 1)
+
+    def test_staff_forbidden_from_clearance_review_and_registrar_allowed(self):
+        """
+        Staff attempting to review/verify clearance must receive 403 Forbidden,
+        while Registrar Frontdesk is permitted.
+        """
+        clearance = StudentClearance.objects.create(
+            user=self.student,
+            file=self._get_dummy_receipt('clr_duty.pdf'),
+            status=ClearanceStatus.PENDING,
+        )
+        url = reverse('studentclearance-review', args=[clearance.id])
+
+        # 1. Staff attempt -> 403 Forbidden
+        self.client.force_authenticate(user=self.staff1)
+        res_staff = self.client.patch(url, {'status': 'APPROVED'})
+        self.assertEqual(res_staff.status_code, status.HTTP_403_FORBIDDEN)
+        clearance.refresh_from_db()
+        self.assertEqual(clearance.status, ClearanceStatus.PENDING)
+
+        # 2. Registrar Frontdesk attempt -> 200 OK
+        self.client.force_authenticate(user=self.registrar)
+        res_reg = self.client.patch(url, {'status': 'APPROVED'})
+        self.assertEqual(res_reg.status_code, status.HTTP_200_OK)
+        clearance.refresh_from_db()
+        self.assertEqual(clearance.status, ClearanceStatus.APPROVED)
+
+    def test_staff_forbidden_from_payment_verify_and_registrar_allowed(self):
+        """
+        Staff attempting to verify OTC payments must receive 403 Forbidden,
+        while Registrar Frontdesk is permitted.
+        """
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.FOR_VERIFICATION,
+        )
+        payment = PaymentService.submit_payment(
+            actor=self.student,
+            request=req,
+            amount=Decimal('100.00'),
+            receipt_image=self._get_dummy_receipt('otc_duty.png'),
+            receipt_reference_number='OR-DUTY-123',
+        )
+        url = reverse('payment-verify', args=[payment.id])
+
+        # 1. Staff attempt -> 403 Forbidden
+        self.client.force_authenticate(user=self.staff1)
+        res_staff = self.client.patch(url, {'action': 'VERIFY'})
+        self.assertEqual(res_staff.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 2. Registrar Frontdesk attempt -> 200 OK
+        self.client.force_authenticate(user=self.registrar)
+        res_reg = self.client.patch(url, {'action': 'VERIFY'})
+        self.assertEqual(res_reg.status_code, status.HTTP_200_OK)
+        req.refresh_from_db()
+        self.assertEqual(req.status, RequestStatus.PAYMENT_VERIFIED)
+
+    def test_staff_forbidden_from_transitioning_unverified_request(self):
+        """
+        Staff attempting to transition an unverified request into Processing
+        or any other state must receive 403 Forbidden.
+        """
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.PENDING,
+        )
+        url = reverse('credentialrequest-transition', args=[req.id])
+        self.client.force_authenticate(user=self.staff1)
+
+        res = self.client.patch(url, {'status': RequestStatus.PROCESSING})
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        req.refresh_from_db()
+        self.assertEqual(req.status, RequestStatus.PENDING)
+
+        # Service call directly raises PermissionDenied
+        from credentials.services import CredentialRequestService
+        with self.assertRaises(PermissionDenied):
+            CredentialRequestService.transition_request(
+                actor=self.staff1,
+                credential_request=req,
+                new_status=RequestStatus.PROCESSING,
+            )
+
+    def test_staff_queue_only_shows_verified_requests(self):
+        """
+        Staff requests list endpoint returns only verified requests (Processing+),
+        excluding Pending, Requirements Verification, Payment Pending, and
+        For Verification. Registrar sees the full lifecycle.
+        """
+        req_pending = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.PENDING,
+        )
+        req_proc = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.PROCESSING,
+        )
+        req_ready = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.READY_FOR_RELEASE,
+        )
+        url = reverse('credentialrequest-list')
+
+        # Staff queue
+        self.client.force_authenticate(user=self.staff1)
+        res_staff = self.client.get(url)
+        self.assertEqual(res_staff.status_code, status.HTTP_200_OK)
+        staff_ids = [r['id'] for r in res_staff.data]
+        self.assertNotIn(str(req_pending.id), staff_ids)
+        self.assertIn(str(req_proc.id), staff_ids)
+        self.assertIn(str(req_ready.id), staff_ids)
+
+        # Registrar queue
+        self.client.force_authenticate(user=self.registrar)
+        res_reg = self.client.get(url)
+        self.assertEqual(res_reg.status_code, status.HTTP_200_OK)
+        reg_ids = [r['id'] for r in res_reg.data]
+        self.assertIn(str(req_pending.id), reg_ids)
+        self.assertIn(str(req_proc.id), reg_ids)
+        self.assertIn(str(req_ready.id), reg_ids)

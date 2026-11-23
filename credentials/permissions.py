@@ -105,8 +105,8 @@ class StudentClearancePermission(permissions.BasePermission):
     """
     Permissions for StudentClearance:
     - POST: Only Students can upload clearances.
-    - PATCH (review): Only Staff and Admins.
-    - SAFE_METHODS: Students can view their own, Staff/Admins can view all.
+    - PATCH (review): Only Registrar Frontdesk and Admins.
+    - SAFE_METHODS: Students view their own, Staff/Registrar/Admins view all.
     """
 
     def has_permission(self, request, view):
@@ -117,24 +117,24 @@ class StudentClearancePermission(permissions.BasePermission):
             return request.user.role == Role.STUDENT
 
         if request.method in ['PUT', 'PATCH']:
-            # Assume detail view for review. Staff, Registrar, and Admin.
-            return request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+            # Clearance review is strictly restricted to Registrar Frontdesk and Admin
+            return request.user.role in [Role.REGISTRAR, Role.ADMIN]
 
         return True
 
     def has_object_permission(self, request, view, obj):
         if request.user.role == Role.STUDENT:
             return obj.user == request.user
-        if request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
-            return True
-        return False
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+        return request.user.role in [Role.REGISTRAR, Role.ADMIN]
 
 
 class PaymentPermission(permissions.BasePermission):
     """
     Permissions for Payment:
     - POST: Students (for their own requests).
-    - PATCH (verify): Staff, Registrar, and Admin only.
+    - PATCH (verify): Registrar Frontdesk and Admin only.
     - SAFE_METHODS: All authenticated users (filtered by queryset).
     """
 
@@ -146,7 +146,7 @@ class PaymentPermission(permissions.BasePermission):
             return request.user.role == Role.STUDENT
 
         if request.method == 'PATCH' and view.action == 'verify':
-            return request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+            return request.user.role in [Role.REGISTRAR, Role.ADMIN]
 
         if request.method not in permissions.SAFE_METHODS:
             return False
@@ -156,4 +156,6 @@ class PaymentPermission(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.user.role == Role.STUDENT:
             return obj.request.user == request.user
-        return True
+        if request.method in permissions.SAFE_METHODS:
+            return request.user.role in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
+        return request.user.role in [Role.REGISTRAR, Role.ADMIN]

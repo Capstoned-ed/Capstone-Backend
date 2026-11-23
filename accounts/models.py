@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 class Role(models.TextChoices):
     STUDENT = 'student', _('Student')
     STAFF = 'staff', _('Staff')
-    REGISTRAR = 'registrar', _('Registrar')
+    REGISTRAR = 'registrar', _('Registrar Frontdesk')
     ADMIN = 'admin', _('Admin')
 
 

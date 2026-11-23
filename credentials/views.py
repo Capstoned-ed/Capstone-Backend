@@ -18,7 +18,8 @@ from .models import (
     RequirementDocument,
     StudentClearance,
     Payment,
-    RegistrarSettings
+    RegistrarSettings,
+    RequestStatus,
 )
 from .serializers import (
     CredentialTypeSerializer,
@@ -204,6 +205,15 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.role == Role.STUDENT:
             return qs.filter(user=user)
 
+        if user.is_authenticated and user.role == Role.STAFF:
+            return qs.filter(
+                status__in=[
+                    RequestStatus.PROCESSING,
+                    RequestStatus.READY_FOR_RELEASE,
+                    RequestStatus.RELEASED,
+                ]
+            )
+
         return qs
 
     def get_object(self):
@@ -227,6 +237,28 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         if obj:
             self.check_object_permissions(self.request, obj)
             return obj
+
+        # If not found in filtered queryset, check if an unverified request exists
+        # so Staff receives 403 Forbidden instead of generic 404.
+        if self.request.user.is_authenticated and self.request.user.role == Role.STAFF:
+            raw_obj = None
+            try:
+                import uuid
+                u_val = uuid.UUID(lookup_value)
+                raw_obj = CredentialRequest.objects.filter(pk=u_val).first()
+            except (ValueError, TypeError, AttributeError):
+                pass
+            if not raw_obj:
+                raw_obj = CredentialRequest.objects.filter(
+                    tracking_number__iexact=lookup_value
+                ).first()
+            if raw_obj:
+                from rest_framework.exceptions import (
+                    PermissionDenied as DFPendingDenied
+                )
+                raise DFPendingDenied(
+                    "Staff cannot access or process unverified requests."
+                )
 
         return super().get_object()
 
@@ -389,6 +421,21 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['patch'])
     def transition(self, request, pk=None):
         credential_request = self.get_object()
+
+        unverified_statuses = [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.REQUIREMENTS_REJECTED,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+        ]
+        if request.user.role == Role.STAFF and (
+            credential_request.status in unverified_statuses
+        ):
+            return Response(
+                {"detail": "Staff cannot transition unverified requests."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         new_status = request.data.get('status')
         remarks = request.data.get('remarks', '')
@@ -570,6 +617,15 @@ class StudentClearanceViewSet(viewsets.ModelViewSet):
     @extend_schema(responses={200: StudentClearanceSerializer})
     @action(detail=True, methods=['patch'])
     def review(self, request, pk=None):
+        if request.user.role not in [Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {
+                    "detail": (
+                        "Only Registrar Frontdesk and Admin can review clearances."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
         clearance = self.get_object()
         serializer = self.get_serializer(clearance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -696,6 +752,15 @@ class PaymentViewSet(viewsets.ModelViewSet):
     @extend_schema(responses={200: PaymentSerializer})
     @action(detail=True, methods=['patch'])
     def verify(self, request, pk=None):
+        if request.user.role not in [Role.REGISTRAR, Role.ADMIN]:
+            return Response(
+                {
+                    "detail": (
+                        "Only Registrar Frontdesk and Admin can verify payments."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
         payment = self.get_object()
 
         action_type = request.data.get('action')

@@ -106,22 +106,28 @@ class CredentialRequestService:
     TRANSITION_MATRIX = {
         RequestStatus.PENDING: [
             {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
-                'roles': [Role.STAFF]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.REGISTRAR]},
+            {'status': RequestStatus.FOR_VERIFICATION,
+                'roles': [Role.REGISTRAR]},
+            {'status': RequestStatus.PAYMENT_VERIFIED,
+                'roles': [Role.REGISTRAR]},
+            {'status': RequestStatus.PROCESSING,
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.REQUIREMENTS_VERIFICATION: [
             {'status': RequestStatus.PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
-                'roles': [Role.STAFF]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.REGISTRAR]}
+                'roles': [Role.REGISTRAR]}
         ],
         RequestStatus.REQUIREMENTS_REJECTED: [
             {'status': RequestStatus.PENDING, 'roles': [Role.STUDENT]},
@@ -129,22 +135,22 @@ class CredentialRequestService:
         ],
         RequestStatus.PAYMENT_PENDING: [
             {'status': RequestStatus.FOR_VERIFICATION,
-                'roles': [Role.STUDENT, Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.STUDENT, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.REGISTRAR]}
+                'roles': [Role.REGISTRAR]}
         ],
         RequestStatus.FOR_VERIFICATION: [
             {'status': RequestStatus.PAYMENT_VERIFIED,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PROCESSING,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
-                'roles': [Role.STAFF, Role.REGISTRAR]},
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED,
                 'roles': [Role.STUDENT]}
         ],
@@ -563,6 +569,19 @@ class CredentialRequestService:
         if actor.role == Role.ADMIN:
             raise PermissionDenied(
                 "Admins have read-only access to request processing."
+            )
+
+        # Staff cannot verify clearance/payment or transition unverified requests
+        unverified_statuses = [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.REQUIREMENTS_REJECTED,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+        ]
+        if actor.role == Role.STAFF and current_status in unverified_statuses:
+            raise PermissionDenied(
+                "Staff cannot verify or transition unverified requests."
             )
 
         # When Auto-Approve is ON and Staff hands a PROCESSING request off via
@@ -990,6 +1009,10 @@ class StudentClearanceService:
     @staticmethod
     @transaction.atomic
     def review_clearance(actor, clearance, status, remarks=""):
+        if actor.role not in [Role.REGISTRAR, Role.ADMIN]:
+            raise PermissionDenied(
+                "Only Registrar Frontdesk and Admin can review clearances."
+            )
         norm_status = str(status).strip().upper() if status else ''
         if norm_status in ['VERIFIED', 'APPROVED', ClearanceStatus.APPROVED]:
             canonical_status = ClearanceStatus.APPROVED
@@ -1184,6 +1207,10 @@ class PaymentService:
     @staticmethod
     @transaction.atomic
     def verify_payment(actor, payment, action, remarks=""):
+        if actor.role not in [Role.REGISTRAR, Role.ADMIN]:
+            raise PermissionDenied(
+                "Only Registrar Frontdesk and Admin can verify payments."
+            )
         if action not in ['VERIFY', 'REJECT']:
             raise ValidationError("Action must be VERIFY or REJECT.")
 
