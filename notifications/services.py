@@ -29,7 +29,33 @@ def send_request_notification(
     rel_id_str = str(reference_id) if reference_id is not None else None
     cutoff = timezone.now() - timedelta(seconds=60)
 
-    # Strict deduplication check by (user, title, reference_id) within 60s
+    # 1. Unread notification deduplication guard:
+    # If an unread notification already exists for (user, title, ref), refresh it
+    unread_qs = Notification.objects.filter(
+        user=user,
+        is_read=False,
+    )
+    if title:
+        unread_qs = unread_qs.filter(title=title)
+    if rel_id_str:
+        unread_qs = unread_qs.filter(related_object_id=rel_id_str)
+    elif event_type:
+        unread_qs = unread_qs.filter(event_type=event_type)
+
+    existing_unread = unread_qs.first()
+    if existing_unread:
+        logger.info(
+            "Refreshed existing unread notification for user %s, title %s, ref %s",
+            getattr(user, 'username', user),
+            title,
+            rel_id_str,
+        )
+        existing_unread.message = message
+        existing_unread.created_at = timezone.now()
+        existing_unread.save(update_fields=['message', 'created_at'])
+        return existing_unread
+
+    # 2. Strict deduplication check by (user, title, reference_id) within 60s
     existing_qs = Notification.objects.filter(
         user=user,
         created_at__gte=cutoff,
@@ -118,13 +144,36 @@ class NotificationService:
     ):
         """
         Creates a notification synchronously with strict idempotency / deduplication.
-        Prevents duplicate notifications for the same recipient, title/event, and
-        reference ID within a 60-second window, ignoring slight message differences.
+        1. Checks for an existing unread notification for the same recipient,
+           event/title, and reference ID. If found, refreshes its message and
+           timestamp to prevent duplicate unread spam.
+        2. Checks for a recent notification within a 60-second window.
         """
         rel_id_str = str(related_object_id) if related_object_id is not None else None
         cutoff = timezone.now() - timedelta(seconds=60)
 
-        # Idempotency guard: prevent duplicate notifications
+        # 1. Unread notification deduplication guard:
+        unread_qs = Notification.objects.filter(
+            user=recipient,
+            is_read=False,
+        )
+        if title:
+            unread_qs = unread_qs.filter(title=title)
+        else:
+            unread_qs = unread_qs.filter(event_type=event_type)
+
+        if rel_id_str:
+            existing_unread = unread_qs.filter(related_object_id=rel_id_str).first()
+        else:
+            existing_unread = unread_qs.filter(message=message).first()
+
+        if existing_unread:
+            existing_unread.message = message
+            existing_unread.created_at = timezone.now()
+            existing_unread.save(update_fields=['message', 'created_at'])
+            return existing_unread
+
+        # 2. Idempotency guard: prevent duplicate notifications within 60s
         qs = Notification.objects.filter(
             user=recipient,
             created_at__gte=cutoff,

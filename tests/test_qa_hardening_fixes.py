@@ -21,7 +21,11 @@ from credentials.models import (
     RequestStatus,
     StudentClearance,
 )
-from credentials.services import PaymentService
+from credentials.services import (
+    CredentialRequestService,
+    PaymentService,
+    StudentClearanceService,
+)
 from credentials.storage import private_storage
 from notifications.models import Notification, NotificationEvent
 from notifications.services import NotificationService
@@ -931,3 +935,263 @@ class QAHardeningFixesTests(APITestCase):
         self.assertIn(str(req_pending.id), reg_ids)
         self.assertIn(str(req_proc.id), reg_ids)
         self.assertIn(str(req_ready.id), reg_ids)
+
+    def test_notification_role_routing_intake_and_fulfillment(self):
+        """
+        Verify strict role-based routing:
+        - Intake alerts (Request Created, Clearance Uploaded, Payment Submitted)
+          reach Registrar Frontdesk and Admin, NOT Staff.
+        - Fulfillment alerts reach Staff only once verified/assigned.
+        - Student receives only their milestones.
+        """
+        # 1. Request Created
+        req = CredentialRequestService.create_request(
+            actor=self.student,
+            validated_data={
+                'credential_type': self.cred_type,
+                'status': 'PENDING'
+            }
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.student,
+                event_type=NotificationEvent.REQUEST_CREATED,
+                related_object_id=str(req.id)
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.registrar,
+                event_type=NotificationEvent.REQUEST_CREATED,
+                related_object_id=str(req.id)
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.admin,
+                event_type=NotificationEvent.REQUEST_CREATED,
+                related_object_id=str(req.id)
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.staff1,
+                event_type=NotificationEvent.REQUEST_CREATED,
+            ).exists()
+        )
+
+        # 2. Clearance Uploaded
+        clearance = StudentClearanceService.submit_clearance(
+            actor=self.student,
+            file=self._get_dummy_receipt('clr_route.pdf')
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.registrar,
+                event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+                related_object_id=str(clearance.id)
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.admin,
+                event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+                related_object_id=str(clearance.id)
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.staff1,
+                event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+            ).exists()
+        )
+
+        # 3. Payment Uploaded
+        req.status = RequestStatus.PAYMENT_PENDING
+        req.save()
+        payment = PaymentService.submit_payment(
+            actor=self.student,
+            request=req,
+            amount=150.00,
+            receipt_image=self._get_dummy_receipt('pay_route.pdf'),
+            receipt_reference_number="OR-ROUTE-1"
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.registrar,
+                event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                related_object_id=str(payment.id)
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.admin,
+                event_type=NotificationEvent.PAYMENT_SUBMITTED,
+                related_object_id=str(payment.id)
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.staff1,
+                event_type=NotificationEvent.PAYMENT_SUBMITTED,
+            ).exists()
+        )
+
+        # 4. Payment Verified
+        PaymentService.verify_payment(
+            actor=self.registrar,
+            payment=payment,
+            action='VERIFY'
+        )
+        req.refresh_from_db()
+        self.assertEqual(req.status, RequestStatus.PAYMENT_VERIFIED)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.student,
+                event_type=NotificationEvent.PAYMENT_VERIFIED,
+                related_object_id=str(req.id)
+            ).exists()
+        )
+
+        # 5. Assigned & Processed
+        CredentialRequestService.transition_request(
+            actor=self.registrar,
+            credential_request=req,
+            new_status=RequestStatus.PROCESSING,
+            assigned_staff=self.staff1
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.staff1,
+                event_type=NotificationEvent.REQUEST_ASSIGNED,
+                related_object_id=str(req.id)
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.student,
+                title=f"Request Processing ({req.tracking_number})"
+            ).exists()
+        )
+
+        # 6. Ready for Release
+        CredentialRequestService.transition_request(
+            actor=self.registrar,
+            credential_request=req,
+            new_status=RequestStatus.READY_FOR_RELEASE
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.student,
+                title=f"Ready for Release ({req.tracking_number})"
+            ).exists()
+        )
+
+        # 7. Released
+        CredentialRequestService.transition_request(
+            actor=self.staff1,
+            credential_request=req,
+            new_status=RequestStatus.RELEASED
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.student,
+                title=f"Document Released ({req.tracking_number})"
+            ).exists()
+        )
+
+    def test_notification_unread_refresh_prevents_duplicate_spam(self):
+        """
+        Re-uploads or repeated saves do not duplicate unread notifications
+        for the same recipient, title, and reference ID.
+        """
+        notif1 = NotificationService.create_notification(
+            recipient=self.student,
+            event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+            title="Clearance Uploaded",
+            message="Initial clearance upload",
+            related_object_type="StudentClearance",
+            related_object_id="clr-repeat-1"
+        )
+        self.assertFalse(notif1.is_read)
+
+        # Simulate a repeated upload / save
+        notif2 = NotificationService.create_notification(
+            recipient=self.student,
+            event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+            title="Clearance Uploaded",
+            message="Re-uploaded clearance with new signature",
+            related_object_type="StudentClearance",
+            related_object_id="clr-repeat-1"
+        )
+        self.assertEqual(notif1.id, notif2.id)
+        self.assertEqual(
+            Notification.objects.filter(
+                user=self.student,
+                title="Clearance Uploaded",
+                related_object_id="clr-repeat-1"
+            ).count(),
+            1
+        )
+        notif1.refresh_from_db()
+        self.assertEqual(notif1.message, "Re-uploaded clearance with new signature")
+
+    def test_staff_notification_feed_filters_unverified_intake_alerts(self):
+        """
+        GET /api/notifications/ for Staff excludes unverified intake alerts
+        (REQUEST_CREATED, CLEARANCE_SUBMITTED, PAYMENT_SUBMITTED) while
+        including fulfillment alerts (REQUEST_ASSIGNED).
+        Admin includes intake alerts.
+        """
+        # Create notifications directly
+        Notification.objects.create(
+            user=self.staff1,
+            title="New Request Submitted",
+            event_type=NotificationEvent.REQUEST_CREATED,
+            message="Request submitted alert"
+        )
+        Notification.objects.create(
+            user=self.staff1,
+            title="Clearance Uploaded",
+            event_type=NotificationEvent.CLEARANCE_SUBMITTED,
+            message="Clearance alert"
+        )
+        Notification.objects.create(
+            user=self.staff1,
+            title="Payment Submitted",
+            event_type=NotificationEvent.PAYMENT_SUBMITTED,
+            message="Payment alert"
+        )
+        notif_assigned = Notification.objects.create(
+            user=self.staff1,
+            title="Request Assigned",
+            event_type=NotificationEvent.REQUEST_ASSIGNED,
+            message="Fulfillment assignment alert"
+        )
+
+        url = reverse('notification-list')
+
+        # Staff query
+        self.client.force_authenticate(user=self.staff1)
+        res_staff = self.client.get(url)
+        self.assertEqual(res_staff.status_code, status.HTTP_200_OK)
+        staff_event_types = [n['event_type'] for n in res_staff.data.get('results', [])]
+        self.assertNotIn(NotificationEvent.REQUEST_CREATED, staff_event_types)
+        self.assertNotIn(NotificationEvent.CLEARANCE_SUBMITTED, staff_event_types)
+        self.assertNotIn(NotificationEvent.PAYMENT_SUBMITTED, staff_event_types)
+        self.assertIn(NotificationEvent.REQUEST_ASSIGNED, staff_event_types)
+        staff_ids = [n['id'] for n in res_staff.data.get('results', [])]
+        self.assertIn(str(notif_assigned.id), staff_ids)
+
+        # Admin query includes intake alerts
+        notif_admin = Notification.objects.create(
+            user=self.admin,
+            title="New Request Submitted",
+            event_type=NotificationEvent.REQUEST_CREATED,
+            message="Admin intake alert"
+        )
+        self.client.force_authenticate(user=self.admin)
+        res_admin = self.client.get(url)
+        self.assertEqual(res_admin.status_code, status.HTTP_200_OK)
+        admin_ids = [n['id'] for n in res_admin.data.get('results', [])]
+        self.assertIn(str(notif_admin.id), admin_ids)
