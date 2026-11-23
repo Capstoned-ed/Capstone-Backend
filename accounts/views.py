@@ -155,6 +155,20 @@ class UserViewSet(viewsets.ModelViewSet):
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            req_username = (
+                request.data.get('username')
+                or request.data.get('student_id')
+                or request.data.get('employee_id')
+            )
+            if (
+                req_username and
+                str(req_username).strip().lower() !=
+                str(instance.username).strip().lower()
+            ):
+                return Response(
+                    {"detail": "You cannot modify your own User ID."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)

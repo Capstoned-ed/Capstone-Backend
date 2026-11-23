@@ -538,3 +538,86 @@ class QAHardeningFixesTests(APITestCase):
         }
         res = self.client.post(url, payload, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_admin_can_update_user_id(self):
+        """Admin can update username / student_id for target accounts."""
+        target_student = User.objects.create_user(
+            username='stud_orig_id',
+            password='password123',
+            email='stud_orig@test.com',
+            role=Role.STUDENT,
+        )
+        self.client.force_authenticate(user=self.admin)
+        url = reverse('user-detail', kwargs={'pk': target_student.id})
+        res = self.client.patch(url, {'student_id': 'stud_new_id_2026'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        target_student.refresh_from_db()
+        self.assertEqual(target_student.username, 'stud_new_id_2026')
+
+    def test_admin_updating_user_id_to_duplicate_fails(self):
+        """Admin cannot update user ID to an existing case-insensitive username."""
+        User.objects.create_user(
+            username='existing_user_id',
+            password='password123',
+            email='exist@test.com',
+            role=Role.STUDENT,
+        )
+        target_staff = User.objects.create_user(
+            username='staff_to_edit',
+            password='password123',
+            email='staff_edit@test.com',
+            role=Role.STAFF,
+        )
+        self.client.force_authenticate(user=self.admin)
+        url = reverse('user-detail', kwargs={'pk': target_staff.id})
+        res = self.client.patch(
+            url, {'username': 'EXISTING_USER_ID'}, format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('already registered', str(res.data).lower())
+
+    def test_self_profile_update_cannot_change_user_id(self):
+        """Non-admin user cannot change user ID via self-profile /api/users/me/."""
+        student = User.objects.create_user(
+            username='self_student_id',
+            password='password123',
+            email='self_stud@test.com',
+            role=Role.STUDENT,
+        )
+        self.client.force_authenticate(user=student)
+        url = reverse('user-me')
+        res = self.client.patch(
+            url,
+            {'username': 'hacked_id', 'student_id': 'hacked_id'},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        student.refresh_from_db()
+        self.assertEqual(student.username, 'self_student_id')
+
+    def test_credential_request_serialization_includes_user_category(self):
+        """Request serializer includes user_category and date_of_graduation."""
+        alumnus = User.objects.create_user(
+            username='alumnus_req_user',
+            password='password123',
+            email='alumnus_req@test.com',
+            role=Role.STUDENT,
+            year_level='Alumnus'
+        )
+        StudentClearance.objects.create(
+            user=alumnus,
+            status=ClearanceStatus.APPROVED,
+            file=SimpleUploadedFile("clr.pdf", b"pdf", content_type="application/pdf")
+        )
+        self.client.force_authenticate(user=alumnus)
+        url = reverse('credentialrequest-list')
+        payload = {
+            'credential_type': self.cred_type.id,
+            'remarks': 'For Board Exam [Graduation: March 2024]',
+            'date_of_graduation': 'March 2024'
+        }
+        res = self.client.post(url, payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data.get('user_category'), 'alumnus')
+        self.assertEqual(res.data.get('year_level'), 'Alumnus')
+        self.assertEqual(res.data.get('date_of_graduation'), 'March 2024')

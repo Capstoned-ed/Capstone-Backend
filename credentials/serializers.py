@@ -349,6 +349,8 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
     receipt_reference_number = serializers.SerializerMethodField()
     receipt_image = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
+    user_category = serializers.CharField(read_only=True)
+    year_level = serializers.CharField(read_only=True)
 
     class Meta:
         model = CredentialRequest
@@ -366,7 +368,8 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'is_approved', 'is_auto_approved',
             'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
-            'payment_status'
+            'payment_status',
+            'user_category', 'year_level',
         ]
         read_only_fields = [
             'user', 'status', 'tracking_number', 'created_at', 'updated_at',
@@ -379,7 +382,8 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
             'is_approved', 'is_auto_approved',
             'release_date',
             'or_number', 'receipt_reference_number', 'receipt_image',
-            'payment_status'
+            'payment_status',
+            'user_category', 'year_level',
         ]
 
     def get_student_name(self, obj):
@@ -665,6 +669,18 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
                             "only."
                         )
                     })
+            else:
+                date_grad = str(attrs.get('date_of_graduation') or '').strip()
+                if date_grad:
+                    cur_remarks = str(attrs.get('remarks') or '').strip()
+                    if not re.search(
+                        r'\[(?:Date of Graduation|Graduation Date|Graduation):',
+                        cur_remarks,
+                        re.IGNORECASE,
+                    ):
+                        attrs['remarks'] = (
+                            f"{cur_remarks} [Graduation: {date_grad}]".strip()
+                        )
 
         copies_val = attrs.pop('copies', None)
         raw_items = attrs.pop('document_items', None)
@@ -792,6 +808,27 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         ret['copies'] = total_copies
         ret['total_amount'] = f"{total_amt:.2f}"
         ret['assessed_amount'] = f"{total_amt:.2f}"
+
+        user = getattr(instance, 'user', None)
+        year_level = getattr(user, 'year_level', '') or ''
+        year_str = str(year_level).strip().lower()
+        is_alumnus = 'alumn' in year_str or 'grad' in year_str
+
+        date_grad = ''
+        remarks = getattr(instance, 'remarks', '') or ''
+        match_grad = re.search(
+            r'\[(?:Date of Graduation|Graduation Date|Graduation):\s*([^\]]+)\]',
+            remarks,
+            re.IGNORECASE,
+        )
+        if match_grad:
+            date_grad = match_grad.group(1).strip()
+        elif is_alumnus:
+            date_grad = 'Graduated'
+
+        ret['user_category'] = 'alumnus' if is_alumnus else 'student'
+        ret['year_level'] = year_level
+        ret['date_of_graduation'] = date_grad
         return ret
 
 
