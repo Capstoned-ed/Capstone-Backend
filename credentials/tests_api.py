@@ -256,6 +256,72 @@ class CredentialRequestAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_verification_to_processing_and_staff_visibility(self):
+        """
+        Registrar verifies a request into PROCESSING:
+        - It transitions to PROCESSING.
+        - Staff can view the unassigned request in their queryset.
+        - Registrar can assign staff to the PROCESSING request.
+        - Staff can view the assigned request in their queryset.
+        """
+        self.req1.status = 'FOR_VERIFICATION'
+        self.req1.save()
+
+        # Before verification: Staff cannot see unverified requests
+        self.client.force_authenticate(user=self.staff)
+        res_before = self.client.get(self.url_list)
+        self.assertEqual(res_before.status_code, status.HTTP_200_OK)
+        staff_req_ids = [r['id'] for r in res_before.data]
+        self.assertNotIn(str(self.req1.id), staff_req_ids)
+
+        # Registrar verifies request -> transitions to PROCESSING
+        self.client.force_authenticate(user=self.registrar)
+        url_trans = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        res_trans = self.client.patch(url_trans, {'status': 'PROCESSING'}, format='json')
+        self.assertEqual(res_trans.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PROCESSING')
+
+        # After verification: Staff sees newly verified unassigned request in staff queryset
+        self.client.force_authenticate(user=self.staff)
+        res_after = self.client.get(self.url_list)
+        self.assertEqual(res_after.status_code, status.HTTP_200_OK)
+        staff_req_ids = [r['id'] for r in res_after.data]
+        self.assertIn(str(self.req1.id), staff_req_ids)
+
+        # Registrar assigns staff to the PROCESSING request (lock guard unlocked)
+        self.client.force_authenticate(user=self.registrar)
+        res_assign = self.client.patch(url_trans, {'status': 'PROCESSING', 'assigned_staff': self.staff.username}, format='json')
+        self.assertEqual(res_assign.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.assigned_staff, self.staff)
+
+        # Staff can see it in assigned queue
+        self.client.force_authenticate(user=self.staff)
+        res_assigned = self.client.get(self.url_list, {'assigned_only': 'true'})
+        self.assertEqual(res_assigned.status_code, status.HTTP_200_OK)
+        assigned_ids = [r['id'] for r in res_assigned.data]
+        self.assertIn(str(self.req1.id), assigned_ids)
+
+    def test_payment_verified_appears_in_staff_queue(self):
+        """Staff queryset includes PAYMENT_VERIFIED requests."""
+        self.req1.status = 'PAYMENT_PENDING'
+        self.req1.save()
+
+        self.client.force_authenticate(user=self.registrar)
+        url_trans = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
+        res = self.client.patch(url_trans, {'status': 'PAYMENT_VERIFIED'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.req1.refresh_from_db()
+        self.assertEqual(self.req1.status, 'PAYMENT_VERIFIED')
+
+        # Staff gets the request in list
+        self.client.force_authenticate(user=self.staff)
+        res_staff = self.client.get(self.url_list)
+        self.assertEqual(res_staff.status_code, status.HTTP_200_OK)
+        staff_ids = [r['id'] for r in res_staff.data]
+        self.assertIn(str(self.req1.id), staff_ids)
+
 
 class RequirementDocumentAPITests(APITestCase):
     @classmethod
