@@ -138,8 +138,6 @@ class CredentialRequestService:
                 'roles': [Role.STUDENT, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_VERIFIED,
                 'roles': [Role.REGISTRAR]},
-            {'status': RequestStatus.PROCESSING,
-                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]},
             {'status': RequestStatus.REJECTED,
                 'roles': [Role.REGISTRAR]}
