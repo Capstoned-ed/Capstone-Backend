@@ -496,19 +496,32 @@ class CredentialRequestService:
 
         if release_date:
             from datetime import datetime, date
+            parsed_rel_date = None
             if isinstance(release_date, (datetime, date)):
-                credential_request.release_date = (
+                parsed_rel_date = (
                     release_date if isinstance(release_date, date)
                     else release_date.date()
                 )
             elif isinstance(release_date, str) and release_date.strip():
                 clean_str = release_date.strip().split('T')[0]
                 try:
-                    credential_request.release_date = datetime.strptime(
+                    parsed_rel_date = datetime.strptime(
                         clean_str, '%Y-%m-%d'
                     ).date()
                 except ValueError:
                     pass
+            if parsed_rel_date:
+                today = (
+                    timezone.localdate()
+                    if hasattr(timezone, 'localdate')
+                    else timezone.now().date()
+                )
+                if (
+                    credential_request.release_date != parsed_rel_date
+                    and parsed_rel_date < today
+                ):
+                    raise ValidationError("Release date cannot be in the past.")
+                credential_request.release_date = parsed_rel_date
 
         # Allow Staff/Registrar/Admin to update remarks without changing status
         if canonical_status == current_status:
