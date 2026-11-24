@@ -6,7 +6,6 @@ from .views import (
     RequirementDocumentViewSet,
     StudentClearanceViewSet,
     PaymentViewSet,
-    PredictTurnaroundView,
     AdminDailyForecastView,
     AdminMonthlyWorkloadView,
     MLHealthStatusView,
@@ -26,11 +25,6 @@ router.register(r'payments', PaymentViewSet, basename='payment')
 
 urlpatterns = [
     # ML Prediction & Forecasting Endpoints
-    path(
-        'credentials/predict-turnaround/',
-        PredictTurnaroundView.as_view(),
-        name='predict-turnaround'
-    ),
     path(
         'credentials/forecast/daily/',
         AdminDailyForecastView.as_view(),

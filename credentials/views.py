@@ -812,45 +812,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-class PredictTurnaroundView(APIView):
-    """
-    Predict estimated credential processing duration.
-    Accessible to all authenticated users (Students, Staff, Registrars, Admins).
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        cred_code = (
-            request.query_params.get('credential_type')
-            or request.query_params.get('code', 'TOR')
-        )
-        purpose = request.query_params.get('purpose', 'Employment')
-        date_requested = request.query_params.get('date_requested')
-        num_docs = int(request.query_params.get('num_documents', 1))
-
-        res = MLClient.predict_processing_time(
-            credential_code=cred_code,
-            purpose=purpose,
-            date_requested=date_requested,
-            num_documents=num_docs
-        )
-        return Response(res, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        cred_code = request.data.get('credential_type', 'TOR')
-        purpose = request.data.get('purpose', 'Employment')
-        date_requested = request.data.get('date_requested')
-        num_docs = int(request.data.get('num_documents', 1))
-
-        res = MLClient.predict_processing_time(
-            credential_code=cred_code,
-            purpose=purpose,
-            date_requested=date_requested,
-            num_documents=num_docs
-        )
-        return Response(res, status=status.HTTP_200_OK)
-
-
 class AdminDailyForecastView(APIView):
     """
     Daily incoming credential request forecasting.

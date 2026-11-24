@@ -1,10 +1,9 @@
 """
 Django Integration & Security Tests for RegQuest ML Integration Layer.
 Tests:
-1. Student turnaround prediction access & graceful database fallback
-2. Role-Based Access Control: Students forbidden from administrative forecasts
-3. Staff & Admin permitted access to forecasting endpoints
-4. Fault tolerance when ML microservice is unavailable
+1. Role-Based Access Control: Students forbidden from administrative forecasts
+2. Staff & Admin permitted access to forecasting endpoints
+3. Fault tolerance when ML microservice is unavailable
 """
 
 from unittest.mock import patch
@@ -51,31 +50,9 @@ class MLIntegrationTests(APITestCase):
             is_active=True
         )
 
-        self.turnaround_url = reverse('predict-turnaround')
         self.daily_forecast_url = reverse('admin-daily-forecast')
         self.monthly_workload_url = reverse('admin-monthly-workload')
         self.health_url = reverse('ml-health-status')
-
-    def test_student_can_predict_turnaround(self):
-        self.client.force_authenticate(user=self.student)
-        resp = self.client.get(self.turnaround_url, {'credential_type': 'TOR'})
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        data = resp.json()
-        self.assertEqual(data["status"], "success")
-        self.assertGreater(data["predicted_processing_time"], 0)
-        self.assertEqual(data["unit"], "operating_days")
-
-    def test_turnaround_graceful_fallback_when_service_down(self):
-        self.client.force_authenticate(user=self.student)
-        # Mock _post to simulate network failure
-        with patch.object(MLClient, '_post', return_value=None):
-            resp = self.client.get(self.turnaround_url, {'credential_type': 'TOR'})
-            self.assertEqual(resp.status_code, status.HTTP_200_OK)
-            data = resp.json()
-            self.assertEqual(data["status"], "success")
-            self.assertTrue(data["is_fallback"])
-            # Matches TOR's processing_days in DB (5)
-            self.assertEqual(data["predicted_processing_time"], 5.0)
 
     def test_student_forbidden_from_daily_forecasting(self):
         self.client.force_authenticate(user=self.student)
@@ -130,8 +107,7 @@ class MLIntegrationTests(APITestCase):
         mock_health = {
             "status": "ok",
             "model_availability": {
-                "daily_forecaster": True,
-                "processing_baseline": True
+                "daily_forecaster": True
             }
         }
         with patch.object(MLClient, 'get_health', return_value=mock_health):
