@@ -208,6 +208,7 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.role == Role.STAFF:
             return qs.filter(
                 status__in=[
+                    RequestStatus.PAYMENT_VERIFIED,
                     RequestStatus.PROCESSING,
                     RequestStatus.READY_FOR_RELEASE,
                     RequestStatus.RELEASED,
