@@ -276,13 +276,17 @@ class CredentialRequestAPITests(APITestCase):
 
         # Registrar verifies request -> transitions to PROCESSING
         self.client.force_authenticate(user=self.registrar)
-        url_trans = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
-        res_trans = self.client.patch(url_trans, {'status': 'PROCESSING'}, format='json')
+        url_trans = reverse(
+            'credentialrequest-transition', kwargs={'pk': self.req1.pk}
+        )
+        res_trans = self.client.patch(
+            url_trans, {'status': 'PROCESSING'}, format='json'
+        )
         self.assertEqual(res_trans.status_code, status.HTTP_200_OK)
         self.req1.refresh_from_db()
         self.assertEqual(self.req1.status, 'PROCESSING')
 
-        # After verification: Staff sees newly verified unassigned request in staff queryset
+        # After verification: Staff sees unassigned request in staff queryset
         self.client.force_authenticate(user=self.staff)
         res_after = self.client.get(self.url_list)
         self.assertEqual(res_after.status_code, status.HTTP_200_OK)
@@ -291,7 +295,11 @@ class CredentialRequestAPITests(APITestCase):
 
         # Registrar assigns staff to the PROCESSING request (lock guard unlocked)
         self.client.force_authenticate(user=self.registrar)
-        res_assign = self.client.patch(url_trans, {'status': 'PROCESSING', 'assigned_staff': self.staff.username}, format='json')
+        res_assign = self.client.patch(
+            url_trans,
+            {'status': 'PROCESSING', 'assigned_staff': self.staff.username},
+            format='json'
+        )
         self.assertEqual(res_assign.status_code, status.HTTP_200_OK)
         self.req1.refresh_from_db()
         self.assertEqual(self.req1.assigned_staff, self.staff)
@@ -309,8 +317,12 @@ class CredentialRequestAPITests(APITestCase):
         self.req1.save()
 
         self.client.force_authenticate(user=self.registrar)
-        url_trans = reverse('credentialrequest-transition', kwargs={'pk': self.req1.pk})
-        res = self.client.patch(url_trans, {'status': 'PAYMENT_VERIFIED'}, format='json')
+        url_trans = reverse(
+            'credentialrequest-transition', kwargs={'pk': self.req1.pk}
+        )
+        res = self.client.patch(
+            url_trans, {'status': 'PAYMENT_VERIFIED'}, format='json'
+        )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.req1.refresh_from_db()
         self.assertEqual(self.req1.status, 'PAYMENT_VERIFIED')
