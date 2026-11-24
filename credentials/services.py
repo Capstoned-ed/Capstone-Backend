@@ -764,11 +764,66 @@ class CredentialRequestService:
                 title = (
                     f"Request Action Required ({credential_request.tracking_number})"
                 )
-                clean_rem = str(credential_request.remarks or '').strip()
-                msg = (
-                    f"Your request ({credential_request.tracking_number}) requires "
-                    f"action: {clean_rem or 'Please check your dashboard for details.'}"
+                import re
+
+                raw_rem = str(credential_request.remarks or '').strip()
+                # Strip internal bracketed metadata tags
+                cleaned = re.sub(
+                    r'\[Items:\[[\s\S]*?\]\]', '', raw_rem, flags=re.IGNORECASE
                 )
+                cleaned = re.sub(
+                    r'\[Total:[^\]]*\]', '', cleaned, flags=re.IGNORECASE
+                )
+                cleaned = re.sub(
+                    r'\[Copies:[^\]]*\]', '', cleaned, flags=re.IGNORECASE
+                )
+                cleaned = re.sub(
+                    r'\[Graduation:[^\]]*\]', '', cleaned, flags=re.IGNORECASE
+                )
+                cleaned = re.sub(
+                    r'\[Assigned(?:\s+to)?:[^\]]*\]', '', cleaned, flags=re.IGNORECASE
+                ).strip()
+
+                note_match = re.search(
+                    r'(?:\|\s*)?(?:Note|Reason):\s*([^|\[\n\r]+)',
+                    cleaned,
+                    flags=re.IGNORECASE
+                )
+                if note_match:
+                    clean_reason = note_match.group(1).strip()
+                else:
+                    # Remove leading bracketed document name and purpose if present
+                    leftover = re.sub(r'^\[[^\]]+\]\s*', '', cleaned)
+                    leftover = re.sub(
+                        r'^(?:For\s+[^|;\n\r]+)\s*(?:\|\s*)?',
+                        '',
+                        leftover,
+                        flags=re.IGNORECASE
+                    ).strip()
+                    clean_reason = leftover
+
+                doc_name = (
+                    credential_request.credential_type.name
+                    if credential_request.credential_type
+                    else ''
+                )
+                if not doc_name:
+                    doc_tag_match = re.search(r'\[([^\]]+)\]', raw_rem)
+                    if doc_tag_match:
+                        doc_name = doc_tag_match.group(1).strip()
+
+                doc_part = f" for {doc_name}" if doc_name else ""
+                if clean_reason:
+                    msg = (
+                        f"Your request ({credential_request.tracking_number})"
+                        f"{doc_part} requires action. Reason/Note: {clean_reason}"
+                    )
+                else:
+                    msg = (
+                        f"Your request ({credential_request.tracking_number})"
+                        f"{doc_part} requires action. "
+                        "Please check your dashboard for details."
+                    )
                 NotificationService.send_request_notification(
                     user=credential_request.user,
                     title=title,
