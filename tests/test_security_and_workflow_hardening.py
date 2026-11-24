@@ -312,7 +312,7 @@ class SecurityAndWorkflowHardeningTests(APITestCase):
         self.client.force_authenticate(user=self.staff)
         url = reverse('credentialrequest-transition', kwargs={'pk': req.id})
         resp = self.client.patch(
-            url, {'status': RequestStatus.READY_FOR_RELEASE}, format='json'
+            url, {'status': RequestStatus.REJECTED}, format='json'
         )
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 

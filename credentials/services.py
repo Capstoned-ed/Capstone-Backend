@@ -124,6 +124,10 @@ class CredentialRequestService:
                 'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_PENDING,
                 'roles': [Role.REGISTRAR]},
+            {'status': RequestStatus.FOR_VERIFICATION,
+                'roles': [Role.REGISTRAR]},
+            {'status': RequestStatus.PROCESSING,
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REQUIREMENTS_REJECTED,
                 'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.REJECTED,
@@ -134,6 +138,8 @@ class CredentialRequestService:
             {'status': RequestStatus.CANCELLED, 'roles': [Role.STUDENT]}
         ],
         RequestStatus.PAYMENT_PENDING: [
+            {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.FOR_VERIFICATION,
                 'roles': [Role.STUDENT, Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_VERIFIED,
@@ -143,6 +149,8 @@ class CredentialRequestService:
                 'roles': [Role.REGISTRAR]}
         ],
         RequestStatus.FOR_VERIFICATION: [
+            {'status': RequestStatus.REQUIREMENTS_VERIFICATION,
+                'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PAYMENT_VERIFIED,
                 'roles': [Role.REGISTRAR]},
             {'status': RequestStatus.PROCESSING,
@@ -161,13 +169,19 @@ class CredentialRequestService:
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
                 Role.REGISTRAR, Role.STAFF
             ]},
+            {'status': RequestStatus.RELEASED, 'roles': [
+                Role.REGISTRAR, Role.STAFF
+            ]},
             {'status': RequestStatus.REJECTED, 'roles': [
                 Role.REGISTRAR
             ]}
         ],
         RequestStatus.PROCESSING: [
             {'status': RequestStatus.READY_FOR_RELEASE, 'roles': [
-                Role.REGISTRAR
+                Role.REGISTRAR, Role.STAFF
+            ]},
+            {'status': RequestStatus.RELEASED, 'roles': [
+                Role.REGISTRAR, Role.STAFF
             ]},
             {'status': RequestStatus.REJECTED, 'roles': [
                 Role.REGISTRAR
@@ -370,9 +384,13 @@ class CredentialRequestService:
             'READY FOR PICKUP': RequestStatus.READY_FOR_RELEASE,
             'READY_FOR_PICKUP': RequestStatus.READY_FOR_RELEASE,
             'READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+            'FOR RELEASING': RequestStatus.READY_FOR_RELEASE,
+            'FOR_RELEASING': RequestStatus.READY_FOR_RELEASE,
             'RELEASING': RequestStatus.READY_FOR_RELEASE,
             'APPROVED': RequestStatus.READY_FOR_RELEASE,
             'APPROVED / READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+            'ON_HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
+            'ON HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
             'PENDING_REGISTRAR_APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
             'PENDING REGISTRAR APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
             'RETURNED TO STAFF / FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
