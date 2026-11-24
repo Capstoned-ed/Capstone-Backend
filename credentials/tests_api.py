@@ -334,6 +334,34 @@ class CredentialRequestAPITests(APITestCase):
         staff_ids = [r['id'] for r in res_staff.data]
         self.assertIn(str(self.req1.id), staff_ids)
 
+    def test_past_release_date_rejected(self):
+        """Setting a past release_date raises validation error."""
+        from datetime import date, timedelta
+        self.req1.status = 'PENDING'
+        self.req1.save()
+
+        self.client.force_authenticate(user=self.registrar)
+        url_trans = reverse(
+            'credentialrequest-transition', kwargs={'pk': self.req1.pk}
+        )
+        past_date = (date.today() - timedelta(days=2)).isoformat()
+        res = self.client.patch(
+            url_trans,
+            {'status': 'PAYMENT_PENDING', 'release_date': past_date},
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Release date cannot be in the past', str(res.data))
+
+        # Future date succeeds
+        future_date = (date.today() + timedelta(days=5)).isoformat()
+        res_ok = self.client.patch(
+            url_trans,
+            {'status': 'PAYMENT_PENDING', 'release_date': future_date},
+            format='json'
+        )
+        self.assertEqual(res_ok.status_code, status.HTTP_200_OK)
+
 
 class RequirementDocumentAPITests(APITestCase):
     @classmethod
