@@ -2,7 +2,7 @@ import logging
 import threading
 from datetime import timedelta
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.utils import timezone
 from .models import Notification, NotificationEvent
@@ -94,22 +94,157 @@ def send_request_notification(
                     getattr(user, 'first_name', '')
                     or getattr(user, 'username', 'Student')
                 )
-                subject = f"RegQuest - {title}"
-                ref_info = f"Tracking Number: {rel_id_str}\n\n" if rel_id_str else ""
-                body = (
+                clean_title = str(title or 'Notification').replace('!', '').strip()
+                subject = f"USTP RegQuest - {clean_title}"
+
+                frontend_url = getattr(
+                    settings, 'FRONTEND_URL', 'https://regquest.ustp.edu.ph'
+                ).rstrip('/')
+                if rel_id_str:
+                    tracking_url = (
+                        f"{frontend_url}/student/requests?trackId={rel_id_str}"
+                    )
+                else:
+                    tracking_url = f"{frontend_url}/student/requests"
+
+                ref_line_text = (
+                    f"Tracking Number: {rel_id_str}\n\n" if rel_id_str else ""
+                )
+                text_body = (
                     f"Hello {name},\n\n"
                     f"{message}\n\n"
-                    f"{ref_info}"
-                    "Please check your RegQuest dashboard for real-time updates.\n\n"
-                    "— RegQuest Academic Credential Management System"
+                    f"{ref_line_text}"
+                    f"Track your credential request online at: {tracking_url}\n\n"
+                    "—\n"
+                    "Office of the Registrar\n"
+                    "University of Science and Technology of Southern "
+                    "Philippines (USTP)\n"
+                    "C.M. Recto Ave., Lapasan, Cagayan de Oro City, 9000\n"
+                    "This is an automated transactional notification regarding your "
+                    "credential request."
                 )
-                send_mail(
+
+                ref_html_badge = (
+                    f'<div style="margin: 16px 0; padding: 12px 16px; '
+                    f'background: #f1f5f9; border-radius: 8px; font-size: 13px; '
+                    f'color: #334155;">'
+                    f'<strong>Tracking Number:</strong> '
+                    f'<span style="font-family: monospace; font-size: 14px; '
+                    f'color: #0B0B36; font-weight: bold;">{rel_id_str}</span>'
+                    f'</div>'
+                    if rel_id_str else ""
+                )
+
+                html_body = (
+                    '<!DOCTYPE html>\n'
+                    '<html>\n'
+                    '<head>\n'
+                    '  <meta charset="utf-8">\n'
+                    '  <meta name="viewport" content="width=device-width, '
+                    'initial-scale=1.0">\n'
+                    f'  <title>{clean_title}</title>\n'
+                    '</head>\n'
+                    '<body style="margin: 0; padding: 0; '
+                    'background-color: #f8fafc; '
+                    'font-family: -apple-system, BlinkMacSystemFont, '
+                    '\'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
+                    'color: #1e293b;">\n'
+                    '  <table width="100%" cellpadding="0" cellspacing="0" '
+                    'style="background-color: #f8fafc; padding: 32px 16px;">\n'
+                    '    <tr>\n'
+                    '      <td align="center">\n'
+                    '        <table width="100%" cellpadding="0" cellspacing="0" '
+                    'style="max-width: 580px; background-color: #ffffff; '
+                    'border-radius: 16px; overflow: hidden; '
+                    'box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); '
+                    'border: 1px solid #e2e8f0;">\n'
+                    '          <tr>\n'
+                    '            <td style="background: linear-gradient(135deg, '
+                    '#0B0B36 0%, #1e1b4b 100%); padding: 28px 32px; '
+                    'text-align: left;">\n'
+                    '              <h1 style="margin: 0; color: #ffffff; '
+                    'font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">'
+                    'USTP RegQuest</h1>\n'
+                    '              <p style="margin: 4px 0 0 0; color: #f59e0b; '
+                    'font-size: 12px; font-weight: 600; text-transform: uppercase; '
+                    'letter-spacing: 0.5px;">Office of the Registrar</p>\n'
+                    '            </td>\n'
+                    '          </tr>\n'
+                    '          <tr>\n'
+                    '            <td style="padding: 32px;">\n'
+                    '              <p style="margin: 0 0 16px 0; font-size: 15px; '
+                    'line-height: 1.5; color: #334155;">'
+                    f'Hello <strong>{name}</strong>,</p>\n'
+                    '              <div style="margin: 20px 0; padding: 18px 20px; '
+                    'background-color: #fffbeb; border-left: 4px solid #f59e0b; '
+                    'border-radius: 6px;">\n'
+                    '                <p style="margin: 0; font-size: 14px; '
+                    f'line-height: 1.6; color: #92400e; font-weight: 500;">\n'
+                    f'                  {message}\n'
+                    '                </p>\n'
+                    '              </div>\n'
+                    f'              {ref_html_badge}\n'
+                    '              <div style="margin: 28px 0; text-align: center;">\n'
+                    f'                <a href="{tracking_url}" style="display: '
+                    'inline-block; background-color: #0B0B36; color: #ffffff; '
+                    'text-decoration: none; font-size: 14px; font-weight: 700; '
+                    'padding: 12px 28px; border-radius: 8px;">\n'
+                    '                  Track Status &rarr;\n'
+                    '                </a>\n'
+                    '              </div>\n'
+                    '              <p style="margin: 24px 0 0 0; font-size: 13px; '
+                    'line-height: 1.5; color: #64748b;">\n'
+                    '                You can also view all credential records, '
+                    'submit payments, or download claim stubs directly from '
+                    'your RegQuest student portal.\n'
+                    '              </p>\n'
+                    '            </td>\n'
+                    '          </tr>\n'
+                    '          <tr>\n'
+                    '            <td style="background-color: #f8fafc; '
+                    'border-top: 1px solid #e2e8f0; padding: 24px 32px; '
+                    'text-align: left;">\n'
+                    '              <p style="margin: 0 0 6px 0; font-size: 12px; '
+                    'font-weight: 700; color: #334155;">Office of the Registrar</p>\n'
+                    '              <p style="margin: 0 0 10px 0; font-size: 11px; '
+                    'line-height: 1.4; color: #64748b;">\n'
+                    '                University of Science and Technology of '
+                    'Southern Philippines (USTP)<br>\n'
+                    '                C.M. Recto Ave., Lapasan, '
+                    'Cagayan de Oro City, 9000\n'
+                    '              </p>\n'
+                    '              <p style="margin: 0; font-size: 11px; '
+                    'line-height: 1.4; color: #94a3b8;">\n'
+                    '                This is an official transactional notification '
+                    'sent to your registered account. Please do not reply '
+                    'directly to this email.\n'
+                    '              </p>\n'
+                    '            </td>\n'
+                    '          </tr>\n'
+                    '        </table>\n'
+                    '      </td>\n'
+                    '    </tr>\n'
+                    '  </table>\n'
+                    '</body>\n'
+                    '</html>'
+                )
+
+                reply_to_email = getattr(settings, 'EMAIL_HOST_USER', None)
+                reply_to = (
+                    [reply_to_email]
+                    if reply_to_email and '@' in reply_to_email
+                    else None
+                )
+
+                email_msg = EmailMultiAlternatives(
                     subject=subject,
-                    message=body,
+                    body=text_body,
                     from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user_email],
-                    fail_silently=False,
+                    to=[user_email],
+                    reply_to=reply_to,
                 )
+                email_msg.attach_alternative(html_body, "text/html")
+                email_msg.send(fail_silently=False)
             except Exception as exc:
                 logger.error(
                     "Failed to send email notification to %s for %s: %s",

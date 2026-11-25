@@ -1195,3 +1195,69 @@ class QAHardeningFixesTests(APITestCase):
         self.assertEqual(res_admin.status_code, status.HTTP_200_OK)
         admin_ids = [n['id'] for n in res_admin.data.get('results', [])]
         self.assertIn(str(notif_admin.id), admin_ids)
+
+    def test_staff_cannot_transition_to_unverified_status(self):
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.PROCESSING,
+        )
+        self.client.force_authenticate(user=self.staff1)
+        url = reverse('credentialrequest-transition', kwargs={'pk': req.id})
+
+        for unverified in [
+            RequestStatus.PENDING,
+            RequestStatus.REQUIREMENTS_VERIFICATION,
+            RequestStatus.PAYMENT_PENDING,
+            RequestStatus.FOR_VERIFICATION,
+        ]:
+            res = self.client.patch(url, {'status': unverified}, format='json')
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_past_releasing_date_rejected(self):
+        req = CredentialRequest.objects.create(
+            user=self.student,
+            credential_type=self.cred_type,
+            status=RequestStatus.PROCESSING,
+        )
+        self.client.force_authenticate(user=self.registrar)
+        url = reverse('credentialrequest-transition', kwargs={'pk': req.id})
+        res = self.client.patch(
+            url,
+            {
+                'status': RequestStatus.READY_FOR_RELEASE,
+                'release_date': '2020-01-01',
+            },
+            format='json'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_send_request_notification_uses_html_and_reply_to(self):
+        from notifications.services import send_request_notification
+        user_with_email = User.objects.create_user(
+            username='email_user_test',
+            email='email_user_test@example.com',
+            password='password123',
+            role=Role.STUDENT,
+        )
+        mail.outbox = []
+        send_request_notification(
+            user=user_with_email,
+            title="Credential Ready for Release",
+            message="Your official transcript is ready for claiming at Window 3.",
+            reference_id="BSIT-2026-001",
+            send_email=True,
+        )
+        # Wait briefly for thread execution
+        import time
+        for _ in range(20):
+            if mail.outbox:
+                break
+            time.sleep(0.05)
+
+        self.assertTrue(len(mail.outbox) >= 1)
+        sent = mail.outbox[-1]
+        self.assertIn("USTP RegQuest - Credential Ready for Release", sent.subject)
+        self.assertEqual(sent.to, ['email_user_test@example.com'])
+        self.assertTrue(hasattr(sent, 'alternatives'))
+        self.assertTrue(any(mime == 'text/html' for _, mime in sent.alternatives))

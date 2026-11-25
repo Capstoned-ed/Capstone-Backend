@@ -58,3 +58,11 @@ class IsStaffOrAdmin(BasePermission):
         return _check_live_user_role(
             request, [Role.STAFF, Role.REGISTRAR, Role.ADMIN]
         )
+
+
+class IsRegistrarOrAdmin(BasePermission):
+    """Allows access strictly to active registrar or admin users."""
+    def has_permission(self, request, view):
+        return _check_live_user_role(
+            request, [Role.REGISTRAR, Role.ADMIN]
+        )

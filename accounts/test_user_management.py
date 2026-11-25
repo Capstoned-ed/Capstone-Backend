@@ -163,25 +163,36 @@ class TestStaffDirectoryView:
 
         url = reverse('staff-directory')
 
-        # Staff access
+        # Staff forbidden from accessing staff directory
         api_client.force_authenticate(user=staff)
+        res_staff_dir = api_client.get(url)
+        assert res_staff_dir.status_code == status.HTTP_403_FORBIDDEN
+
+        # Staff forbidden from accessing full user list
+        user_list_url = reverse('user-list')
+        assert api_client.get(user_list_url).status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.get(
+            f"{user_list_url}?role=STAFF"
+        ).status_code == status.HTTP_403_FORBIDDEN
+
+        # Registrar access to minimal staff directory
+        api_client.force_authenticate(user=registrar)
         res = api_client.get(url)
         assert res.status_code == status.HTTP_200_OK
         usernames = [u['username'] for u in res.data]
         assert 'staff_dir1' in usernames
-        assert 'reg_dir1' in usernames
-        assert 'admin_dir1' in usernames
         assert 'stud_dir1' not in usernames
+        # Verify strict data minimization (no PII leaked)
+        first_entry = res.data[0]
+        assert set(first_entry.keys()) == {'id', 'username', 'full_name'}
+        assert 'email' not in first_entry
+        assert 'contact_number' not in first_entry
+        assert 'birth_date' not in first_entry
 
-        # Registrar access
-        api_client.force_authenticate(user=registrar)
-        res = api_client.get(url)
-        assert res.status_code == status.HTTP_200_OK
-
-        # Admin access
+        # Admin access to minimal staff directory
         api_client.force_authenticate(user=admin)
-        res = api_client.get(url)
-        assert res.status_code == status.HTTP_200_OK
+        res_admin = api_client.get(url)
+        assert res_admin.status_code == status.HTTP_200_OK
 
         # Staff users shortcut endpoint
         staff_shortcut_url = reverse('staff-users-list')
@@ -189,15 +200,16 @@ class TestStaffDirectoryView:
         res_shortcut = api_client.get(staff_shortcut_url)
         assert res_shortcut.status_code == status.HTTP_200_OK
 
-        # Registrar listing users filtered by role=STAFF
-        user_list_url = reverse('user-list')
-        res_role_staff = api_client.get(f"{user_list_url}?role=STAFF")
-        assert res_role_staff.status_code == status.HTTP_200_OK
-        staff_usernames = [u['username'] for u in res_role_staff.data]
-        assert 'staff_dir1' in staff_usernames
-        assert 'stud_dir1' not in staff_usernames
+        # Registrar cannot list full users via UserViewSet (Admin only)
+        assert api_client.get(user_list_url).status_code == status.HTTP_403_FORBIDDEN
+
+        # Admin can list full users via UserViewSet
+        api_client.force_authenticate(user=admin)
+        res_admin_users = api_client.get(f"{user_list_url}?role=STAFF")
+        assert res_admin_users.status_code == status.HTTP_200_OK
 
         # Registrar cannot create or modify users via UserViewSet (Admin only)
+        api_client.force_authenticate(user=registrar)
         res_create = api_client.post(
             user_list_url,
             {'username': 'unauthorized', 'role': Role.STAFF}
@@ -207,6 +219,7 @@ class TestStaffDirectoryView:
         # Student forbidden
         api_client.force_authenticate(user=student)
         assert api_client.get(url).status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.get(user_list_url).status_code == status.HTTP_403_FORBIDDEN
 
         # Unauthenticated unauthorized
         api_client.force_authenticate(user=None)

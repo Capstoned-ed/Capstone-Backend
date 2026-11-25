@@ -9,6 +9,7 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.http import FileResponse
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from audit.services import AuditService
 
@@ -449,15 +450,26 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
             RequestStatus.PAYMENT_PENDING,
             RequestStatus.FOR_VERIFICATION,
         ]
+        new_status = request.data.get('status')
+        canonical_target = (
+            CredentialRequestService.get_canonical_status(new_status)
+            if new_status else None
+        )
+
         if request.user.role == Role.STAFF and (
             credential_request.status in unverified_statuses
+            or canonical_target in unverified_statuses
         ):
             return Response(
-                {"detail": "Staff cannot transition unverified requests."},
+                {
+                    "detail": (
+                        "Staff cannot transition requests into or from "
+                        "unverified statuses."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        new_status = request.data.get('status')
         remarks = request.data.get('remarks', '')
         assigned_staff = request.data.get('assigned_staff')
         in_process_queue = request.data.get('in_process_queue')
@@ -471,6 +483,35 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
                 {"detail": "status is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if release_date:
+            from zoneinfo import ZoneInfo
+            from datetime import datetime, date
+            try:
+                if isinstance(release_date, str):
+                    clean_str = release_date.strip().split('T')[0]
+                    parsed_dt = datetime.strptime(clean_str, '%Y-%m-%d').date()
+                elif isinstance(release_date, datetime):
+                    parsed_dt = release_date.date()
+                elif isinstance(release_date, date):
+                    parsed_dt = release_date
+                else:
+                    parsed_dt = None
+
+                try:
+                    today_manila = timezone.localdate()
+                except Exception:
+                    today_manila = (
+                        timezone.now().astimezone(ZoneInfo('Asia/Manila')).date()
+                    )
+
+                if parsed_dt and parsed_dt < today_manila:
+                    return Response(
+                        {"detail": "Release date cannot be in the past."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Exception:
+                pass
 
         updated_request = CredentialRequestService.transition_request(
             actor=request.user,
@@ -820,6 +861,19 @@ class AdminDailyForecastView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _compute_default_start_date():
+        from zoneinfo import ZoneInfo
+        from datetime import timedelta
+        try:
+            base_date = timezone.localdate()
+        except Exception:
+            base_date = timezone.now().astimezone(ZoneInfo('Asia/Manila')).date()
+        cur = base_date + timedelta(days=1)
+        while cur.weekday() >= 5:
+            cur += timedelta(days=1)
+        return cur.strftime('%Y-%m-%d')
+
     def get(self, request):
         if request.user.role not in [Role.STAFF, Role.REGISTRAR, Role.ADMIN]:
             return Response(
@@ -834,13 +888,20 @@ class AdminDailyForecastView(APIView):
 
         start_date = request.query_params.get('start_date')
         if not start_date:
-            from datetime import datetime, timedelta
-            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            start_date = self._compute_default_start_date()
 
         op_days = int(request.query_params.get('operating_days', 20))
         res = MLClient.forecast_daily_demand(
             start_date=start_date, operating_days=op_days
         )
+        if isinstance(res, dict) and 'next_operating_day' not in res:
+            try:
+                from datetime import datetime
+                s_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                res['next_operating_day'] = s_dt.strftime('%A')
+                res['next_operating_date'] = start_date
+            except Exception:
+                pass
         return Response(res, status=status.HTTP_200_OK)
 
     def post(self, request):
@@ -857,13 +918,20 @@ class AdminDailyForecastView(APIView):
 
         start_date = request.data.get('start_date')
         if not start_date:
-            from datetime import datetime, timedelta
-            start_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            start_date = self._compute_default_start_date()
 
         op_days = int(request.data.get('operating_days', 20))
         res = MLClient.forecast_daily_demand(
             start_date=start_date, operating_days=op_days
         )
+        if isinstance(res, dict) and 'next_operating_day' not in res:
+            try:
+                from datetime import datetime
+                s_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                res['next_operating_day'] = s_dt.strftime('%A')
+                res['next_operating_date'] = start_date
+            except Exception:
+                pass
         return Response(res, status=status.HTTP_200_OK)
 
 
