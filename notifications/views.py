@@ -30,7 +30,9 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
             return Notification.objects.none()
 
         # Strict data isolation: Users can only see their own notifications
-        qs = Notification.objects.filter(user=self.request.user)
+        qs = Notification.objects.filter(
+            user=self.request.user
+        ).select_related('user')
         # Staff must not receive or see unverified intake/verification alerts
         if getattr(self.request.user, 'role', None) == Role.STAFF:
             qs = qs.exclude(

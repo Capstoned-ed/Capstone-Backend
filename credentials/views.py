@@ -137,10 +137,11 @@ class CredentialRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = CredentialRequest.objects.select_related(
-            'user', 'credential_type', 'assigned_staff'
+            'user', 'credential_type', 'assigned_staff', 'approved_by'
         ).prefetch_related(
             'payments',
-            'documents'
+            'documents',
+            'clearance_records'
         ).order_by('-created_at')
 
         status_param = self.request.query_params.get('status')
