@@ -475,6 +475,16 @@ class CredentialRequestSerializer(serializers.ModelSerializer):
         req_id = (
             obj.get('id') if isinstance(obj, dict) else getattr(obj, 'id', None)
         )
+        if hasattr(obj, 'clearance_records'):
+            records = list(obj.clearance_records.all())
+            if records:
+                records.sort(
+                    key=lambda r: getattr(r, 'uploaded_at', None)
+                    or getattr(r, 'created_at', None) or 0,
+                    reverse=True
+                )
+                return records[0]
+
         if req_id:
             clr = (
                 StudentClearance.objects
