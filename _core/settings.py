@@ -126,7 +126,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 
@@ -236,7 +236,19 @@ EMAIL_PORT = env.int('EMAIL_PORT', default=587)
 EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = env(
-    'DEFAULT_FROM_EMAIL',
-    default='RegQuest <noreply@regquest.local>'
+
+if EMAIL_HOST_USER:
+    DEFAULT_FROM_EMAIL = env(
+        'DEFAULT_FROM_EMAIL',
+        default=f"RegQuest - Office of the Registrar <{EMAIL_HOST_USER}>"
+    )
+else:
+    DEFAULT_FROM_EMAIL = env(
+        'DEFAULT_FROM_EMAIL',
+        default='RegQuest - Office of the Registrar <noreply@ustp.edu.ph>'
+    )
+
+FRONTEND_URL = env(
+    'FRONTEND_URL',
+    default='https://regquest.ustp.edu.ph'
 )

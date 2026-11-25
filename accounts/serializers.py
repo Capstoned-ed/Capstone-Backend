@@ -76,6 +76,31 @@ class UserSerializer(serializers.ModelSerializer):
         return name or getattr(obj, 'username', '')
 
 
+class StaffDirectorySerializer(serializers.ModelSerializer):
+    """
+    Minimal, non-sensitive serializer for staff assignment dropdowns.
+    Strips all PII (email, phone, birth date, password status, login times).
+    """
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'full_name']
+        read_only_fields = ['id', 'username', 'full_name']
+
+    def get_full_name(self, obj):
+        parts = [
+            getattr(obj, 'first_name', ''),
+            getattr(obj, 'middle_name', ''),
+            getattr(obj, 'last_name', ''),
+        ]
+        name = " ".join(p for p in parts if p).strip()
+        ext = getattr(obj, 'name_extension', '')
+        if ext:
+            name = f"{name} {ext}".strip()
+        return name or getattr(obj, 'username', '')
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
     """
     Validation layer for creating a new user.

@@ -349,6 +349,50 @@ class CredentialRequestService:
 
         return credential_request
 
+    STATUS_MAP = {
+        'PENDING': RequestStatus.PENDING,
+        'PENDONG': RequestStatus.PENDING,
+        'REQUIREMENTS_VERIFICATION': RequestStatus.REQUIREMENTS_VERIFICATION,
+        'REQUIREMENTS_REJECTED': RequestStatus.REQUIREMENTS_REJECTED,
+        'PAYMENT_PENDING': RequestStatus.PAYMENT_PENDING,
+        'FOR_VERIFICATION': RequestStatus.FOR_VERIFICATION,
+        'FOR VERIFICATION': RequestStatus.FOR_VERIFICATION,
+        'FOR_VERIFY': RequestStatus.FOR_VERIFICATION,
+        'PAYMENT_VERIFIED': RequestStatus.PAYMENT_VERIFIED,
+        'PROCESSING': RequestStatus.PROCESSING,
+        'READY_FOR_RELEASE': RequestStatus.READY_FOR_RELEASE,
+        'RELEASED': RequestStatus.RELEASED,
+        'REJECTED': RequestStatus.REJECTED,
+        'CANCELLED': RequestStatus.CANCELLED,
+        'FOR PAYMENT': RequestStatus.PAYMENT_PENDING,
+        'FOR_PAYMENT': RequestStatus.PAYMENT_PENDING,
+        'FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+        'FOR_PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+        'READY FOR PICKUP': RequestStatus.READY_FOR_RELEASE,
+        'READY_FOR_PICKUP': RequestStatus.READY_FOR_RELEASE,
+        'READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+        'FOR RELEASING': RequestStatus.READY_FOR_RELEASE,
+        'FOR_RELEASING': RequestStatus.READY_FOR_RELEASE,
+        'RELEASING': RequestStatus.READY_FOR_RELEASE,
+        'APPROVED': RequestStatus.READY_FOR_RELEASE,
+        'APPROVED / READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
+        'ON_HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
+        'ON HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
+        'PENDING_REGISTRAR_APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
+        'PENDING REGISTRAR APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
+        'RETURNED TO STAFF / FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
+        'RELEASED / COMPLETED': RequestStatus.RELEASED,
+        'CLAIMED': RequestStatus.RELEASED,
+        'COMPLETED': RequestStatus.RELEASED,
+    }
+
+    @classmethod
+    def get_canonical_status(cls, status_str):
+        if not status_str:
+            return None
+        clean_key = str(status_str).strip().upper().replace('-', '_')
+        return cls.STATUS_MAP.get(clean_key, clean_key)
+
     @staticmethod
     @transaction.atomic
     def transition_request(
@@ -363,43 +407,8 @@ class CredentialRequestService:
         current_status = credential_request.status
 
         # Normalize status to canonical RequestStatus enum
-        status_map = {
-            'PENDING': RequestStatus.PENDING,
-            'REQUIREMENTS_VERIFICATION': RequestStatus.REQUIREMENTS_VERIFICATION,
-            'REQUIREMENTS_REJECTED': RequestStatus.REQUIREMENTS_REJECTED,
-            'PAYMENT_PENDING': RequestStatus.PAYMENT_PENDING,
-            'FOR_VERIFICATION': RequestStatus.FOR_VERIFICATION,
-            'FOR VERIFICATION': RequestStatus.FOR_VERIFICATION,
-            'FOR_VERIFY': RequestStatus.FOR_VERIFICATION,
-            'PAYMENT_VERIFIED': RequestStatus.PAYMENT_VERIFIED,
-            'PROCESSING': RequestStatus.PROCESSING,
-            'READY_FOR_RELEASE': RequestStatus.READY_FOR_RELEASE,
-            'RELEASED': RequestStatus.RELEASED,
-            'REJECTED': RequestStatus.REJECTED,
-            'CANCELLED': RequestStatus.CANCELLED,
-            'FOR PAYMENT': RequestStatus.PAYMENT_PENDING,
-            'FOR_PAYMENT': RequestStatus.PAYMENT_PENDING,
-            'FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
-            'FOR_PROCESSING': RequestStatus.PAYMENT_VERIFIED,
-            'READY FOR PICKUP': RequestStatus.READY_FOR_RELEASE,
-            'READY_FOR_PICKUP': RequestStatus.READY_FOR_RELEASE,
-            'READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
-            'FOR RELEASING': RequestStatus.READY_FOR_RELEASE,
-            'FOR_RELEASING': RequestStatus.READY_FOR_RELEASE,
-            'RELEASING': RequestStatus.READY_FOR_RELEASE,
-            'APPROVED': RequestStatus.READY_FOR_RELEASE,
-            'APPROVED / READY FOR RELEASE': RequestStatus.READY_FOR_RELEASE,
-            'ON_HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
-            'ON HOLD': RequestStatus.REQUIREMENTS_VERIFICATION,
-            'PENDING_REGISTRAR_APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
-            'PENDING REGISTRAR APPROVAL': 'PENDING_REGISTRAR_APPROVAL',
-            'RETURNED TO STAFF / FOR PROCESSING': RequestStatus.PAYMENT_VERIFIED,
-            'RELEASED / COMPLETED': RequestStatus.RELEASED,
-            'CLAIMED': RequestStatus.RELEASED,
-            'COMPLETED': RequestStatus.RELEASED,
-        }
         clean_key = str(new_status).strip().upper().replace('-', '_')
-        canonical_status = status_map.get(clean_key, clean_key)
+        canonical_status = CredentialRequestService.get_canonical_status(new_status)
 
         settings_obj = RegistrarSettings.get_settings()
         auto_approved_bypass = False
@@ -529,11 +538,13 @@ class CredentialRequestService:
                 except ValueError:
                     pass
             if parsed_rel_date:
-                today = (
-                    timezone.localdate()
-                    if hasattr(timezone, 'localdate')
-                    else timezone.now().date()
-                )
+                from zoneinfo import ZoneInfo
+                try:
+                    today = timezone.localdate()
+                except Exception:
+                    today = (
+                        timezone.now().astimezone(ZoneInfo('Asia/Manila')).date()
+                    )
                 if (
                     credential_request.release_date != parsed_rel_date
                     and parsed_rel_date < today
@@ -610,9 +621,12 @@ class CredentialRequestService:
             RequestStatus.PAYMENT_PENDING,
             RequestStatus.FOR_VERIFICATION,
         ]
-        if actor.role == Role.STAFF and current_status in unverified_statuses:
+        if actor.role == Role.STAFF and (
+            current_status in unverified_statuses
+            or canonical_status in unverified_statuses
+        ):
             raise PermissionDenied(
-                "Staff cannot verify or transition unverified requests."
+                "Staff cannot transition requests into or from unverified statuses."
             )
 
         # When Auto-Approve is ON and Staff hands a PROCESSING request off via
